@@ -1,6 +1,5 @@
 #include "unity.h"
 #include "rsa.h"
-#include "rsatest.h"
 #include "test_helpers.h"
 #include <string.h> // For strstr
 #include <stdio.h>  // For sprintf
@@ -10,13 +9,22 @@
 #define _countof(arr) (sizeof(arr) / sizeof(arr[0]))
 #endif
 
-void setUp(void) {
+// From test_constants.c
+extern const char *RSA_TEST_MODULI[];
+extern const char *RSA_TEST_PRIMES_P[];
+extern const char *RSA_TEST_PRIMES_Q[];
+extern const char *RSA_TEST_EXPONENTS_D[];
+extern const char *RSA_TEST_SIGNATURES[];
+extern const char *RSA_TEST_MESSAGES[];
+extern const unsigned int NUM_NIST_TESTS;
+
+/*void setUp(void) {
     // Can be empty for now
 }
 
 void tearDown(void) {
     // Can be empty for now
-}
+}*/
 
 void test_all_nist_sign_verify_vectors(void) {
     rsa_ctx_t public_key, private_key;
@@ -26,24 +34,23 @@ void test_all_nist_sign_verify_vectors(void) {
     rsa_init(&private_key);
     mpz_inits(plaintext, signature, expected_signature, should_be_valid_modulus, output, NULL);
 
-    for (size_t i = 0; i < _countof(RSA_TEST_MODULI); ++i) {
+    for (size_t i = 0; i < NUM_NIST_TESTS; ++i) {
         bool expect_fail = (strstr(RSA_TEST_SIGNATURES[i], "FAIL") != NULL);
         char msg_buffer[256];
         sprintf(msg_buffer, "NIST Sign/Verify Test Vector %zu", i + 1); // Use %zu for size_t
 
-        // Set keys
-        // Assuming RSA_TEST_PUBLIC_EXPONENT_E is a hex string like "10001"
+        // Set keys - the text exponent is always 0x10001, the default exponent
         int result_pub = rsa_set_pubkey(&public_key, RSA_TEST_MODULI[i], strlen(RSA_TEST_MODULI[i]),
-                                        RSA_TEST_PUBLIC_EXPONENT_E, strlen(RSA_TEST_PUBLIC_EXPONENT_E));
+                                        RSA_DEFAULT_PUBLIC_EXPONENT, RSA_BASE_HEX);
         char pub_key_msg[512];
-        sprintf(pub_key_msg, "%s: rsa_set_pubkey failed for N=%s, E=%s", msg_buffer, RSA_TEST_MODULI[i], RSA_TEST_PUBLIC_EXPONENT_E);
+        sprintf(pub_key_msg, "%s: rsa_set_pubkey failed for N=%s, E=%d", msg_buffer, RSA_TEST_MODULI[i], RSA_DEFAULT_PUBLIC_EXPONENT);
         TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS, result_pub, pub_key_msg);
 
         int result_priv = rsa_set_privkey(&private_key, RSA_TEST_PRIMES_P[i], strlen(RSA_TEST_PRIMES_P[i]),
                                           RSA_TEST_PRIMES_Q[i], strlen(RSA_TEST_PRIMES_Q[i]),
-                                          RSA_TEST_PUBLIC_EXPONENT_E, strlen(RSA_TEST_PUBLIC_EXPONENT_E));
+                                          RSA_DEFAULT_PUBLIC_EXPONENT, RSA_BASE_HEX);
         char priv_key_msg[512];
-        sprintf(priv_key_msg, "%s: rsa_set_privkey failed for P=%s, Q=%s, E=%s", msg_buffer, RSA_TEST_PRIMES_P[i], RSA_TEST_PRIMES_Q[i], RSA_TEST_PUBLIC_EXPONENT_E);
+        sprintf(priv_key_msg, "%s: rsa_set_privkey failed for P=%s, Q=%s, E=%d", msg_buffer, RSA_TEST_PRIMES_P[i], RSA_TEST_PRIMES_Q[i], RSA_DEFAULT_PUBLIC_EXPONENT);
         TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS, result_priv, priv_key_msg);
 
         if (result_pub != RSA_SUCCESS || result_priv != RSA_SUCCESS) {

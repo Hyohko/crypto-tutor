@@ -1,16 +1,19 @@
 #include "unity.h"
 #include "rsa.h"
-#include "rsatest.h" // For NIST_TEST_MODULI etc.
 #include "test_helpers.h"
 #include <stdlib.h> // For rand, srand
 #include <time.h>   // For time
 #include <stdio.h>  // For sprintf
 #include <string.h> // For strlen
 
-// For _countof macro, if not defined in rsatest.h
-#ifndef _countof
-#define _countof(arr) (sizeof(arr) / sizeof(arr[0]))
-#endif
+// From test_constants.c
+extern const char *RSA_TEST_MODULI[];
+extern const char *RSA_TEST_PRIMES_P[];
+extern const char *RSA_TEST_PRIMES_Q[];
+extern const char *RSA_TEST_EXPONENTS_D[];
+extern const char *RSA_TEST_SIGNATURES[];
+extern const char *RSA_TEST_MESSAGES[];
+extern const unsigned int NUM_NIST_TESTS;
 
 // Copied from rsa.c as a temporary workaround for this subtask
 // Ideally, this would be exposed via rsa.h or a shared utility header
@@ -39,15 +42,15 @@ static void perform_random_test_logic(bool use_nist_keys, int bitlen, const char
     // Key Setup
     if (use_nist_keys) {
         srand(time(NULL));
-        int index = rand() % _countof(RSA_TEST_MODULI);
+        int index = rand() % NUM_NIST_TESTS;
         sprintf(msg_buffer, "%s (NIST Vector %d): rsa_set_pubkey failed", test_name_prefix, index);
         TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS,
-            rsa_set_pubkey(&public_key, RSA_TEST_MODULI[index], strlen(RSA_TEST_MODULI[index]), RSA_TEST_PUBLIC_EXPONENT_E, strlen(RSA_TEST_PUBLIC_EXPONENT_E)),
+            rsa_set_pubkey(&public_key, RSA_TEST_MODULI[index], strlen(RSA_TEST_MODULI[index]), RSA_DEFAULT_PUBLIC_EXPONENT, RSA_BASE_HEX),
             msg_buffer);
 
         sprintf(msg_buffer, "%s (NIST Vector %d): rsa_set_privkey failed", test_name_prefix, index);
         TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS,
-            rsa_set_privkey(&private_key, RSA_TEST_PRIMES_P[index], strlen(RSA_TEST_PRIMES_P[index]), RSA_TEST_PRIMES_Q[index], strlen(RSA_TEST_PRIMES_Q[index]), RSA_TEST_PUBLIC_EXPONENT_E, strlen(RSA_TEST_PUBLIC_EXPONENT_E)),
+            rsa_set_privkey(&private_key, RSA_TEST_PRIMES_P[index], strlen(RSA_TEST_PRIMES_P[index]), RSA_TEST_PRIMES_Q[index], strlen(RSA_TEST_PRIMES_Q[index]), RSA_DEFAULT_PUBLIC_EXPONENT, RSA_BASE_HEX),
             msg_buffer);
 
         mpz_mul(should_be_valid_modulus, private_key.p, private_key.q);
@@ -59,7 +62,7 @@ static void perform_random_test_logic(bool use_nist_keys, int bitlen, const char
     } else {
         sprintf(msg_buffer, "%s (Bitlen %d): rsa_genkey failed", test_name_prefix, bitlen);
         TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS,
-            rsa_genkey(&private_key, bitlen, RSA_TEST_PUBLIC_EXPONENT_E, strlen(RSA_TEST_PUBLIC_EXPONENT_E)),
+            rsa_genkey(&private_key, bitlen, RSA_DEFAULT_PUBLIC_EXPONENT),
             msg_buffer);
 
         sprintf(msg_buffer, "%s (Bitlen %d): rsa_pubkey_from_private failed", test_name_prefix, bitlen);
@@ -95,13 +98,13 @@ static void perform_random_test_logic(bool use_nist_keys, int bitlen, const char
     rsa_free(&private_key);
 }
 
-void setUp(void) {
+/*void setUp(void) {
     // Empty
 }
 
 void tearDown(void) {
     // Empty
-}
+}*/
 
 void test_random_sign_verify_enc_dec_with_nist_keys(void) {
     perform_random_test_logic(true, 2048, "NISTKeys"); // Bitlen is nominal for NIST keys

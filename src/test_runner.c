@@ -1,4 +1,5 @@
-#include "unity.h"
+#include "unity/unity.h"
+#include "rsa.h"
 
 // Forward declare test functions
 void test_all_nist_private_exponent_vectors(void);
@@ -15,6 +16,7 @@ void test_euler_totient_function_with_vectors(void);
 // Test suites will be run here
 
 int main(void) {
+    rsa_set_allocators();
     UNITY_BEGIN();
     RUN_TEST(test_all_nist_private_exponent_vectors);
     RUN_TEST(test_all_nist_sign_verify_vectors);

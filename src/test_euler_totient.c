@@ -51,13 +51,13 @@ static void euler_totient(mpz_t result, const mpz_t n) {
 }
 
 
-void setUp(void) {
+/*void setUp(void) {
     // Empty
 }
 
 void tearDown(void) {
     // Empty
-}
+}*/
 
 void test_euler_totient_function_with_vectors(void) {
     mpz_t result_mpz, n_mpz; // Renamed to avoid conflict with parameter n in euler_totient

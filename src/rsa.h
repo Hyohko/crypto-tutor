@@ -32,7 +32,7 @@ For more information, please refer to <https://unlicense.org>
 #include <stdbool.h>
 
 #ifndef _countof
-#define _countof(array) (sizeof(array) / sizeof(array[0]))
+#define _countof(arr) (sizeof(arr) / sizeof(arr[0]))
 #endif
 
 #ifndef MAX

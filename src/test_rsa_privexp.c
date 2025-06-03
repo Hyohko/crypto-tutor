@@ -1,16 +1,17 @@
 #include "unity.h"
 #include "rsa.h"      // Assuming rsa.h contains rsa_ctx_t, rsa_init, rsa_set_privkey, rsa_compute_private_exponent, rsa_clear, rsa_free and RSA_SUCCESS
-#include "rsatest.h"  // Assuming rsatest.h contains RSA_TEST_PRIMES_P, RSA_TEST_PRIMES_Q, RSA_TEST_EXPONENTS_D, RSA_TEST_PUBLIC_EXPONENT_E and _countof
 #include "test_helpers.h"
 
-// For _countof macro, if not defined in rsatest.h
-#ifndef _countof
-#define _countof(arr) (sizeof(arr) / sizeof(arr[0]))
-#endif
+// From test_constants.c
+extern const char *RSA_TEST_MODULI[];
+extern const char *RSA_TEST_PRIMES_P[];
+extern const char *RSA_TEST_PRIMES_Q[];
+extern const char *RSA_TEST_EXPONENTS_D[];
+extern const char *RSA_TEST_SIGNATURES[];
+extern const char *RSA_TEST_MESSAGES[];
+extern const unsigned int NUM_NIST_TESTS;
 
-static rsa_ctx_t test_key_privexp;
-
-void setUp(void) {
+/*void setUp(void) {
     // Initialize any necessary global/static rsa_ctx_t or other variables for tests.
     // For now, direct initialization in test functions is preferred for clarity,
     // but if there's common setup, it can go here.
@@ -20,13 +21,13 @@ void setUp(void) {
 void tearDown(void) {
     // Clean up any global/static rsa_ctx_t or other variables.
     // rsa_free(&test_key_privexp); // Example if a global key were used
-}
+}*/
 
 void test_all_nist_private_exponent_vectors(void) {
     rsa_ctx_t private_key;
     rsa_init(&private_key);
 
-    for (size_t i = 0; i < _countof(RSA_TEST_PRIMES_P); ++i) {
+    for (size_t i = 0; i < NUM_NIST_TESTS; ++i) {
         mpz_t expected_d;
         mpz_init(expected_d);
 
@@ -39,7 +40,7 @@ void test_all_nist_private_exponent_vectors(void) {
         int result = rsa_set_privkey(&private_key,
                                      RSA_TEST_PRIMES_P[i], strlen(RSA_TEST_PRIMES_P[i]),
                                      RSA_TEST_PRIMES_Q[i], strlen(RSA_TEST_PRIMES_Q[i]),
-                                     RSA_TEST_PUBLIC_EXPONENT_E, strlen(RSA_TEST_PUBLIC_EXPONENT_E));
+                                     RSA_DEFAULT_PUBLIC_EXPONENT, RSA_BASE_HEX);
 
         TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS, result, "rsa_set_privkey failed");
 

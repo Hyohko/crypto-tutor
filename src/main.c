@@ -33,7 +33,7 @@ int main(void) {
     // rsa_test_main(); // Removed
     // Application specific logic would go here.
     // For now, it can be empty or just print a message.
-    debug_printf("Main application crypto-tutor running.\n");
-    debug_printf("No specific application functionality implemented yet beyond RSA library.\n");
+    LOG_INFO("Main application crypto-tutor running.\n");
+    LOG_INFO("No specific application functionality implemented yet beyond RSA library.\n");
     return 0;
 }
