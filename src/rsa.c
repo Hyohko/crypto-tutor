@@ -1,3 +1,29 @@
+/*
+This is free and unencumbered software released into the public domain.
+
+Anyone is free to copy, modify, publish, use, compile, sell, or
+distribute this software, either in source code form or as a compiled
+binary, for any purpose, commercial or non-commercial, and by any
+means.
+
+In jurisdictions that recognize copyright laws, the author or authors
+of this software dedicate any and all copyright interest in the
+software to the public domain. We make this dedication for the benefit
+of the public at large and to the detriment of our heirs and
+successors. We intend this dedication to be an overt act of
+relinquishment in perpetuity of all present and future rights to this
+software under copyright law.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+OTHER DEALINGS IN THE SOFTWARE.
+
+For more information, please refer to <https://unlicense.org>
+*/
 #include "rsa.h"
 #include <gmp.h>
 #include <stdlib.h>
@@ -41,7 +67,7 @@ static void * secure_realloc(void *ptr, size_t old_size, size_t new_size) {
             char *edit = (char*)ptr + new_size + 1;
             size_t to_zero = old_size - new_size - 1;
             explicit_bzero(edit, to_zero);
-        } 
+        }
         return ptr;
     }
     char *temp = (char*)secure_malloc(new_size);
@@ -170,7 +196,7 @@ void rsa_debug(rsa_ctx_t *ctx) {
     gmp_printf("e: %Zx\n", ctx->e);
     printf("key_size: %zu\n", ctx->key_size);
     printf("is_private: %d\n", ctx->is_private);
-}   
+}
 
 rsa_error_t rsa_mpz_set_pubkey(rsa_ctx_t *ctx, mpz_t modulus, unsigned int exponent) {
     if (NULL == ctx || NULL == modulus) {
@@ -213,7 +239,7 @@ rsa_error_t rsa_set_pubkey(rsa_ctx_t *ctx, const char *modulus, size_t len_modul
     else if (mpz_set_str(ctx->n, modulus, base) != 0) {
         return RSA_ERROR_STRING_CONVERSION; // Error: Invalid modulus format
     }
-    
+
     mpz_set_ui(ctx->e, exponent);
     ctx->is_private = RSA_PUBLIC;
     ctx->key_size = mpz_sizeinbase(ctx->n, 2);
@@ -474,7 +500,7 @@ rsa_error_t rsa_genkey(rsa_ctx_t *ctx, unsigned int bitlen, unsigned int pub_exp
     }
 
     mpz_set_ui(ctx->e, pub_exponent);
-    
+
     // Generate two primes that have a bitlen of half the key size
     rsa_error_t ret = RSA_SUCCESS;
     do {
@@ -528,7 +554,7 @@ rsa_error_t rsa_compute_private_exponent(rsa_ctx_t *ctx) {
         ret = RSA_ERROR_NOT_COPRIME; // Error: e is not coprime to lambda
     } else if (mpz_invert(ctx->d, ctx->e, lambda) == 0) {
         ret = RSA_ERROR_MODINV_NOT_EXIST; // Error: modular inverse doesn't exist
-    } 
+    }
 
     mpz_clears(p_minus_1, q_minus_1, lambda, should_be_one, NULL);
     return ret; // Success
@@ -540,7 +566,7 @@ rsa_error_t rsa_compute_private_exponent(rsa_ctx_t *ctx) {
 // -- If the mpz_probab_prime_p function returns 0, then the number is not prime.
 //    If it returns 1, then it is a strong pseudoprime and passes this test. If it is proven
 //    to be prime, then the function returns 2.
-rsa_error_t rsa_validate_key_components(rsa_ctx_t *ctx) {  
+rsa_error_t rsa_validate_key_components(rsa_ctx_t *ctx) {
     if (NULL == ctx) {
         return RSA_ERROR_INVALID_ARGUMENTS; // Error: Invalid context
     }

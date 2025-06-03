@@ -14,7 +14,7 @@ OBJS = $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(SRCS))
 TARGET = $(BUILD_DIR)/crypto-tutor
 
 # Include system GMP headers and link system GMP library
-INCLUDES = 
+INCLUDES =
 LIBS = -lgmp
 
 # Default target
