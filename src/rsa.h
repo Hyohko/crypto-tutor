@@ -116,8 +116,7 @@ rsa_error_t rsa_mpz_sign(rsa_ctx_t *ctx, mpz_t output, const mpz_t input, const 
 rsa_error_t rsa_mpz_verify(rsa_ctx_t *ctx, const mpz_t message, const mpz_t signature);
 rsa_error_t rsa_validate_key_components(rsa_ctx_t *ctx);
 rsa_error_t rsa_compute_private_exponent(rsa_ctx_t *ctx);
-rsa_error_t rsa_mpz_gen_random_fast(mpz_t result, mp_bitcnt_t num_bits);
-rsa_error_t rsa_mpz_gen_random_secure(mpz_t result, mp_bitcnt_t num_bits);
+rsa_error_t rsa_mpz_gen_random(mpz_t result, mp_bitcnt_t num_bits, bool is_secure);
 
 rsa_error_t rsa_private(rsa_ctx_t *ctx, char *output, size_t olen, const char *input, size_t ilen, rsa_base_t base);
 rsa_error_t rsa_public(rsa_ctx_t *ctx, char *output, size_t olen, const char *input, size_t ilen, rsa_base_t base);

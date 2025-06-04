@@ -92,10 +92,7 @@ static rsa_error_t rsa_genprime(mpz_t prime, mp_bitcnt_t num_bits, bool is_secur
     }
     // Generate a random prime number with the specified number of bits
     do {
-        if (is_secure)
-            rsa_mpz_gen_random_secure(prime, num_bits);
-        else
-            rsa_mpz_gen_random_fast(prime, num_bits);
+        rsa_mpz_gen_random(prime, num_bits, is_secure);
     } while (mpz_probab_prime_p(prime, MILLER_RABIN_ITERATIONS) == 0);
     return RSA_SUCCESS; // Success: prime generated
 }
@@ -132,7 +129,7 @@ static rsa_error_t rsa_primes_too_close(mpz_t p, mpz_t q)
 void rsa_set_allocators(void) {
     static bool is_set = false;
     if(!is_set) {
-        // mp_set_memory_functions(secure_malloc, secure_realloc, secure_free);
+        mp_set_memory_functions(secure_malloc, secure_realloc, secure_free);
         is_set = true;
     }
 }
@@ -419,66 +416,64 @@ const char* rsa_strerror(int err_code) {
     }
 }
 
-rsa_error_t rsa_mpz_gen_random_fast(mpz_t result, mp_bitcnt_t num_bits)
-{
-    if (NULL == result) {
-        return RSA_ERROR_INVALID_ARGUMENTS;
+rsa_error_t rsa_mpz_gen_random(mpz_t result, mp_bitcnt_t num_bits, bool is_secure)
+{   
+    if(is_secure) {
+        if (NULL == result) {
+            return RSA_ERROR_INVALID_ARGUMENTS;
+        }
+        if (num_bits < 2 || (num_bits % 8) != 0) {
+            return RSA_ERROR_INVALID_LENGTH;
+        }
+        size_t num_bytes = num_bits / 8;
+        rsa_error_t ret = RSA_SUCCESS;
+        // read num_bits from /dev/urandom
+        FILE *fp = fopen("/dev/urandom", "rb");
+        if (NULL == fp) {
+            perror("Failed to open /dev/urandom");
+            ret = RSA_ERROR_ALLOC_FAILED; // Error: Failed to open /dev/urandom
+            goto exit;
+        }
+        unsigned char *buffer = (unsigned char*)malloc(num_bytes);
+        if (NULL == buffer) {
+            perror("Failed to alloc random buffer");
+            ret = RSA_ERROR_ALLOC_FAILED; // Error: Memory allocation failed
+            goto exit;
+        }
+        size_t bytes_read = fread(buffer, 1, num_bytes, fp);
+        if (bytes_read != num_bytes) {
+            printf("Failed to read enough bytes from /dev/urandom: %ld\n", num_bytes);
+            ret = RSA_ERROR_ALLOC_FAILED; // Error: Failed to read enough bytes
+            goto exit;
+        }
+        // Convert the buffer to a GMP number
+        mpz_import(result, bytes_read, 1, sizeof(char), 1, 0, buffer);
+    exit:
+        if (NULL != buffer) free(buffer);
+        if (NULL != fp) fclose(fp);
+        return ret;
+    } else {
+        if (NULL == result) {
+            return RSA_ERROR_INVALID_ARGUMENTS;
+        }
+        if (num_bits < 2) {  // Reasonable limits
+            return RSA_ERROR_INVALID_LENGTH;
+        }
+        gmp_randstate_t state;
+        gmp_randinit_default(state);
+        // Get the CPU clock time in nanoseconds for a better seed. Use the last significant byte
+        // to construct the seed by calling clock_gettime four times and using the last byte of each
+        long accumulator = 0;
+        for(int i = 0; i < sizeof(long); i++) {
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            accumulator |= (now.tv_nsec & 0x000000ff) << (i * 8);
+        }
+        gmp_randseed_ui(state, accumulator);
+        mpz_urandomb(result, state, num_bits);
+        gmp_randclear(state);
+        return RSA_SUCCESS;
     }
-    if (num_bits < 2) {  // Reasonable limits
-        return RSA_ERROR_INVALID_LENGTH;
-    }
-    gmp_randstate_t state;
-    gmp_randinit_default(state);
-    // Get the CPU clock time in nanoseconds for a better seed. Use the last significant byte
-    // to construct the seed by calling clock_gettime four times and using the last byte of each
-    long accumulator = 0;
-    for(int i = 0; i < sizeof(long); i++) {
-        struct timespec now;
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        accumulator |= (now.tv_nsec & 0x000000ff) << (i * 8);
-    }
-    gmp_randseed_ui(state, accumulator);
-    mpz_urandomb(result, state, num_bits);
-    gmp_randclear(state);
-    return RSA_SUCCESS;
-}
-
-// More secure by reading from /dev/urandom
-rsa_error_t rsa_mpz_gen_random_secure(mpz_t result, mp_bitcnt_t num_bits)
-{
-    if (NULL == result) {
-        return RSA_ERROR_INVALID_ARGUMENTS;
-    }
-    if (num_bits < 2 || (num_bits % 8) != 0) {
-        return RSA_ERROR_INVALID_LENGTH;
-    }
-    size_t num_bytes = num_bits / 8;
-    rsa_error_t ret = RSA_SUCCESS;
-    // read num_bits from /dev/urandom
-    FILE *fp = fopen("/dev/urandom", "rb");
-    if (NULL == fp) {
-        perror("Failed to open /dev/urandom");
-        ret = RSA_ERROR_ALLOC_FAILED; // Error: Failed to open /dev/urandom
-        goto exit;
-    }
-    unsigned char *buffer = (unsigned char*)malloc(num_bytes);
-    if (NULL == buffer) {
-        perror("Failed to alloc random buffer");
-        ret = RSA_ERROR_ALLOC_FAILED; // Error: Memory allocation failed
-        goto exit;
-    }
-    size_t bytes_read = fread(buffer, 1, num_bytes, fp);
-    if (bytes_read != num_bytes) {
-        printf("Failed to read enough bytes from /dev/urandom: %ld\n", num_bytes);
-        ret = RSA_ERROR_ALLOC_FAILED; // Error: Failed to read enough bytes
-        goto exit;
-    }
-    // Convert the buffer to a GMP number
-    mpz_import(result, bytes_read, 1, sizeof(char), 1, 0, buffer);
-exit:
-    if (NULL != buffer) free(buffer);
-    if (NULL != fp) fclose(fp);
-    return ret;
 }
 
 rsa_error_t rsa_genkey(rsa_ctx_t *ctx, unsigned int bitlen, unsigned int pub_exponent)
@@ -636,7 +631,7 @@ rsa_error_t rsa_mpz_private(rsa_ctx_t *ctx, mpz_t output, const mpz_t input) {
 
         int mod_inv_exists = 0;
         do{
-            rsa_mpz_gen_random_secure(r, ctx->key_size);    // random r less than and coprime to the modulus
+            rsa_mpz_gen_random(r, ctx->key_size, true);    // random r less than and coprime to the modulus
             mpz_gcd(should_be_one, ctx->n, r);
             mod_inv_exists = mpz_invert(r_inv, r, ctx->n);  // r_inv = modular inverse of r mod n, save for later
         } while (mpz_cmp(r, ctx->n) > 0 ||
