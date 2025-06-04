@@ -132,7 +132,7 @@ static rsa_error_t rsa_primes_too_close(mpz_t p, mpz_t q)
 void rsa_set_allocators(void) {
     static bool is_set = false;
     if(!is_set) {
-        // mp_set_memory_functions(secure_malloc, secure_realloc, secure_free);
+        mp_set_memory_functions(secure_malloc, secure_realloc, secure_free);
         is_set = true;
     }
 }
