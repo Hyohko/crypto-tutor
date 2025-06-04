@@ -26,7 +26,7 @@ int main(void) {
     RUN_TEST(test_genkey_1024_multiple_times);
     RUN_TEST(test_genkey_invalid_size_too_small);
     RUN_TEST(test_genkey_invalid_size_too_large);
-    // RUN_TEST(test_genkey_valid_size_not_power_of_two); // Per user request
+    RUN_TEST(test_genkey_valid_size_not_power_of_two); // Per user request
     RUN_TEST(test_euler_totient_function_with_vectors);
     return UNITY_END();
 }

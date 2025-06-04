@@ -36,20 +36,20 @@ void test_all_nist_sign_verify_vectors(void) {
 
     for (size_t i = 0; i < NUM_NIST_TESTS; ++i) {
         bool expect_fail = (strstr(RSA_TEST_SIGNATURES[i], "FAIL") != NULL);
-        char msg_buffer[256];
+        char msg_buffer[8192];
         sprintf(msg_buffer, "NIST Sign/Verify Test Vector %zu", i + 1); // Use %zu for size_t
 
         // Set keys - the text exponent is always 0x10001, the default exponent
         int result_pub = rsa_set_pubkey(&public_key, RSA_TEST_MODULI[i], strlen(RSA_TEST_MODULI[i]),
                                         RSA_DEFAULT_PUBLIC_EXPONENT, RSA_BASE_HEX);
-        char pub_key_msg[512];
+        char pub_key_msg[8192];
         sprintf(pub_key_msg, "%s: rsa_set_pubkey failed for N=%s, E=%d", msg_buffer, RSA_TEST_MODULI[i], RSA_DEFAULT_PUBLIC_EXPONENT);
         TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS, result_pub, pub_key_msg);
 
         int result_priv = rsa_set_privkey(&private_key, RSA_TEST_PRIMES_P[i], strlen(RSA_TEST_PRIMES_P[i]),
                                           RSA_TEST_PRIMES_Q[i], strlen(RSA_TEST_PRIMES_Q[i]),
                                           RSA_DEFAULT_PUBLIC_EXPONENT, RSA_BASE_HEX);
-        char priv_key_msg[512];
+        char priv_key_msg[8192];
         sprintf(priv_key_msg, "%s: rsa_set_privkey failed for P=%s, Q=%s, E=%d", msg_buffer, RSA_TEST_PRIMES_P[i], RSA_TEST_PRIMES_Q[i], RSA_DEFAULT_PUBLIC_EXPONENT);
         TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS, result_priv, priv_key_msg);
 
@@ -65,11 +65,11 @@ void test_all_nist_sign_verify_vectors(void) {
 
         // Check modulus consistency
         mpz_mul(should_be_valid_modulus, private_key.p, private_key.q);
-        char mod_mismatch_pub_msg[256];
+        char mod_mismatch_pub_msg[8192];
         sprintf(mod_mismatch_pub_msg, "%s: Public key modulus N does not match P*Q", msg_buffer);
         TEST_ASSERT_EQUAL_GMP_MPZ(should_be_valid_modulus, public_key.n, mod_mismatch_pub_msg);
 
-        char mod_mismatch_priv_msg[256];
+        char mod_mismatch_priv_msg[8192];
         sprintf(mod_mismatch_priv_msg, "%s: Private key modulus N does not match P*Q", msg_buffer);
         TEST_ASSERT_EQUAL_GMP_MPZ(should_be_valid_modulus, private_key.n, mod_mismatch_priv_msg);
 
@@ -83,7 +83,7 @@ void test_all_nist_sign_verify_vectors(void) {
         rsa_error_t ret_sign = rsa_mpz_private(&private_key, signature, plaintext);
 
         if (expect_fail) {
-            char sign_fail_msg[256];
+            char sign_fail_msg[8192];
             sprintf(sign_fail_msg, "%s: Signing was expected to fail but succeeded.", msg_buffer);
             TEST_ASSERT_NOT_EQUAL_MESSAGE(RSA_SUCCESS, ret_sign, sign_fail_msg);
             rsa_clear(&public_key);
@@ -92,7 +92,7 @@ void test_all_nist_sign_verify_vectors(void) {
             rsa_init(&private_key);
             continue;
         } else {
-            char sign_succ_msg[256];
+            char sign_succ_msg[8192];
             sprintf(sign_succ_msg, "%s: Signing failed unexpectedly.", msg_buffer);
             TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS, ret_sign, sign_succ_msg);
             if (ret_sign != RSA_SUCCESS) {
@@ -102,14 +102,14 @@ void test_all_nist_sign_verify_vectors(void) {
                 rsa_init(&private_key);
                 continue;
             }
-            char sig_match_msg[256];
+            char sig_match_msg[8192];
             sprintf(sig_match_msg, "%s: Signature does not match expected signature.", msg_buffer);
             TEST_ASSERT_EQUAL_GMP_MPZ(expected_signature, signature, sig_match_msg);
         }
 
         // Verify
         rsa_error_t ret_verify = rsa_mpz_public(&public_key, output, signature);
-        char verify_succ_msg[256];
+        char verify_succ_msg[8192];
         sprintf(verify_succ_msg, "%s: Verification failed unexpectedly.", msg_buffer);
         TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS, ret_verify, verify_succ_msg);
 
@@ -120,7 +120,7 @@ void test_all_nist_sign_verify_vectors(void) {
             rsa_init(&private_key);
             continue;
         }
-        char verify_match_msg[256];
+        char verify_match_msg[8192];
         sprintf(verify_match_msg, "%s: Verification output does not match plaintext.", msg_buffer);
         TEST_ASSERT_EQUAL_GMP_MPZ(plaintext, output, verify_match_msg);
 

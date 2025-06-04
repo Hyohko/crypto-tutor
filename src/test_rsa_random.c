@@ -37,7 +37,7 @@ static void perform_random_test_logic(bool use_nist_keys, int bitlen, const char
     rsa_init(&public_key);
     rsa_init(&private_key);
 
-    char msg_buffer[256]; // Increased buffer size for more descriptive messages
+    char msg_buffer[8192]; // Increased buffer size for more descriptive messages
 
     // Key Setup
     if (use_nist_keys) {
