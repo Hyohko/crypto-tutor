@@ -26,8 +26,6 @@ For more information, please refer to <https://unlicense.org>
 */
 #include "debug.h"
 #include "rsa.h"
-// #include "rsatest.h" // Removed
-
 
 int main(void) {
     // rsa_test_main(); // Removed
