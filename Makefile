@@ -81,6 +81,12 @@ $(BUILD_DIR)/%.o: $(UNITY_DIR)/%.c | $(BUILD_DIR)
 	@echo "Compiling $< -> $@"
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
+# Compile source files from TEST_DIR (e.g. src/test/test_runner.c)
+# This rule specifically handles unity.c from its subdirectory.
+$(BUILD_DIR)/%.o: $(TEST_DIR)/%.c | $(BUILD_DIR)
+	@echo "Compiling $< -> $@"
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
 # Create build directory if it doesn't exist
 $(BUILD_DIR):
 	@echo "Creating build directory: $(BUILD_DIR)"
