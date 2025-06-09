@@ -7,6 +7,7 @@ CFLAGS = -Wall -O3 -march=native -mtune=native -flto -DDEBUG -Isrc/unity -Isrc
 SRC_DIR = src
 BUILD_DIR = build
 UNITY_DIR = $(SRC_DIR)/unity
+TEST_DIR = $(SRC_DIR)/test
 
 # Source files
 # Core sources used by both main app and tests
@@ -22,8 +23,8 @@ MAIN_APP_SRCS = $(MAIN_APP_ONLY_SRCS) $(CORE_SRCS)
 UNITY_LIB_SRC = $(UNITY_DIR)/unity.c
 
 # Test runner and individual test files
-TEST_RUNNER_SRC = $(SRC_DIR)/test_runner.c
-TEST_IMPL_SRCS = $(wildcard $(SRC_DIR)/test_*.c)
+TEST_RUNNER_SRC = $(TEST_DIR)/test_runner.c
+TEST_IMPL_SRCS = $(wildcard $(TEST_DIR)/test_*.c)
 
 # All sources for the test executable
 # Order matters for some linkers if there are dependencies, but usually not for .c files to .o
@@ -35,9 +36,9 @@ TEST_SRCS = $(TEST_RUNNER_SRC) $(TEST_IMPL_SRCS) $(CORE_SRCS) $(UNITY_LIB_SRC)
 MAIN_APP_OBJS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(MAIN_APP_ONLY_SRCS)) \
                 $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(CORE_SRCS))
 
-TEST_OBJS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(TEST_RUNNER_SRC)) \
-            $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(TEST_IMPL_SRCS)) \
-            $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(CORE_SRCS)) \
+TEST_OBJS = $(patsubst $(TEST_DIR)/%.c,$(BUILD_DIR)/%.o,$(TEST_RUNNER_SRC)) \
+            $(patsubst $(TEST_DIR)/%.c,$(BUILD_DIR)/%.o,$(TEST_IMPL_SRCS)) \
+            $(patsubst $(TEST_DIR)/%.c,$(BUILD_DIR)/%.o,$(CORE_SRCS)) \
             $(patsubst $(UNITY_DIR)/%.c,$(BUILD_DIR)/%.o,$(UNITY_LIB_SRC))
 
 
