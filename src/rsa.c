@@ -40,12 +40,12 @@ For more information, please refer to <https://unlicense.org>
 
 // Force writing zeroes to newly-allocated blocks of memory
 static void * secure_malloc(size_t alloc_size){
-    char *ret = (char*)malloc(alloc_size);
+    void *ret = malloc(alloc_size);
     if(NULL == ret)
         exit(1); // According to GMP specs, terminate program. GMP doesn't handle alloc errors
     // non-optimizable zero-ing out of the buffer
     explicit_bzero (ret, alloc_size);
-    return (void*)ret;
+    return ret;
 }
 
 // Force writing zeroes before deallocating memory
@@ -60,29 +60,31 @@ static void secure_free(void *ptr, size_t size)
 }
 
 static void * secure_realloc(void *ptr, size_t old_size, size_t new_size) {
-    if(new_size <= old_size) {
-        if(NULL != ptr && new_size != old_size){
-            // erase the end of the memory block, the delta between new_size and old_size
-            // don't allocate new memory.
-            char *edit = (char*)ptr + new_size + 1;
-            size_t to_zero = old_size - new_size - 1;
-            explicit_bzero(edit, to_zero);
-        }
+    // GMP says the first two cases are prevented in its library. Are they?
+    if(NULL == ptr) {
         return ptr;
     }
-    char *temp = (char*)secure_malloc(new_size);
-    if(NULL == temp)
-    {
-        exit(1); // According to GMP specs, terminate program. GMP doesn't handle alloc errors
-        // This will likely happen anyway if secure_malloc fails, but to be on the safe side...
+    else if(0 == new_size) { // zero-size is undefined behavior. Return NULL but leave ptr alone
+        return NULL;
     }
-    if (NULL != ptr)
-    {
-        // if we reach this point, new_size > old_size, so just memcpy with old_size
-        memcpy(temp, (char*)ptr, new_size);
+    else if(new_size == old_size) { // No change in size.
+        return ptr;
+    }
+    else if(new_size < old_size) {
+        // erase the end of the memory block, the delta between new_size and old_size
+        // don't allocate new memory.
+        void *edit = (void*)((char*)ptr + new_size + 1);
+        size_t to_zero = old_size - new_size - 1;
+        explicit_bzero(edit, to_zero);
+        return ptr;
+    }
+    else {// here, new_size > old_size
+        // By GMP specs, if secure_malloc fails, the program will exit(1), so don't bother checking the return.
+        void *temp = secure_malloc(new_size); // zeroed-out buffer
+        memcpy(temp, ptr, old_size);
         secure_free(ptr, old_size);
+        return (void*)temp;
     }
-    return (void*)temp;
 }
 
 static rsa_error_t rsa_genprime(mpz_t prime, mp_bitcnt_t num_bits, bool is_secure)
@@ -577,9 +579,9 @@ rsa_error_t rsa_validate_key_components(rsa_ctx_t *ctx) {
         return RSA_ERROR_INVALID_CONTEXT; // Error: Context is not initialized
     }
 
-    // On the odd chance that the public exponent is not 0x10001 or 3 (the two most common public exponents),
+    // On the odd chance that the public exponent is not 0x10001 17, or 3 (the three most common public exponents),
     // check that it is prime
-    if (mpz_cmp_ui(ctx->e, RSA_DEFAULT_PUBLIC_EXPONENT) != 0 && mpz_cmp_ui(ctx->e, 3) != 0) {
+    if (mpz_cmp_ui(ctx->e, RSA_DEFAULT_PUBLIC_EXPONENT) != 0 && mpz_cmp_ui(ctx->e, 17) != 0 && mpz_cmp_ui(ctx->e, 3) != 0) {
         if (mpz_cmp_ui(ctx->e, 0) <= 0) {
             return RSA_ERROR_INVALID_EXPONENT; // Error: public exponent is not positive
         }
