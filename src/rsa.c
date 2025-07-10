@@ -34,6 +34,10 @@ For more information, please refer to <https://unlicense.org>
 
 #define MILLER_RABIN_ITERATIONS 50
 
+#define MPZ_ENDIAN_MSB_FIRST    (1)
+#define MPZ_ENDIAN_LSB_FIRST    (-1)
+#define MPZ_ENDIAN_CPU_NATIVE   (0)
+
 /****************************************************
     Static / private functions
 ****************************************************/
@@ -236,7 +240,7 @@ rsa_error_t rsa_set_pubkey(rsa_ctx_t *ctx, const char *modulus, size_t len_modul
     }
     if (RSA_BASE_BINARYDATA == base) {
         // import raw bytes into ctx->n assuming a big-endian byte order
-        mpz_import(ctx->n, len_modulus, 1, sizeof(char), 1, 0, modulus);
+        mpz_import(ctx->n, len_modulus, MPZ_ENDIAN_MSB_FIRST, sizeof(char), MPZ_ENDIAN_MSB_FIRST, 0, modulus);
     }
     else if (mpz_set_str(ctx->n, modulus, base) != 0) {
         return RSA_ERROR_STRING_CONVERSION; // Error: Invalid modulus format
@@ -301,8 +305,8 @@ rsa_error_t rsa_set_privkey(rsa_ctx_t *ctx, const char *prime_p, size_t len_p, c
 
     if (RSA_BASE_BINARYDATA == base) {
         // import raw bytes into ctx->p and ctx->q assuming a big-endian byte order
-        mpz_import(ctx->p, len_p, 1, sizeof(char), 1, 0, prime_p);
-        mpz_import(ctx->q, len_q, 1, sizeof(char), 1, 0, prime_q);
+        mpz_import(ctx->p, len_p, MPZ_ENDIAN_MSB_FIRST, sizeof(char), MPZ_ENDIAN_MSB_FIRST, 0, prime_p);
+        mpz_import(ctx->q, len_q, MPZ_ENDIAN_MSB_FIRST, sizeof(char), MPZ_ENDIAN_MSB_FIRST, 0, prime_q);
     }
     else {
         if (mpz_set_str(ctx->p, prime_p, base) != 0) {
@@ -445,6 +449,33 @@ rsa_error_t rsa_mpz_gen_random_fast(mpz_t result, mp_bitcnt_t num_bits)
     return RSA_SUCCESS;
 }
 
+static unsigned char *rand_bytes_urandom(size_t num_bytes) {
+    unsigned char *buf = NULL;
+    FILE *fp = fopen("/dev/urandom", "rb");
+    if (NULL == fp) {
+        perror("Failed to open /dev/urandom");
+        goto exit;
+    }
+    buf = (unsigned char*)malloc(num_bytes);
+    if (NULL == buf) {
+        perror("Failed to alloc random buffer");
+        goto exit;
+    }
+    size_t bytes_read = fread(buf, 1, num_bytes, fp);
+    if (bytes_read != num_bytes) {
+        printf("Failed to read enough bytes from /dev/urandom: %ld\n", num_bytes);
+        free(buf);
+        buf = NULL;
+        // fallthrough to exit
+    }
+    
+exit:
+    if (NULL != fp) {
+        fclose(fp);
+    }
+    return buf;
+}
+
 // More secure by reading from /dev/urandom
 rsa_error_t rsa_mpz_gen_random_secure(mpz_t result, mp_bitcnt_t num_bits)
 {
@@ -455,32 +486,17 @@ rsa_error_t rsa_mpz_gen_random_secure(mpz_t result, mp_bitcnt_t num_bits)
         return RSA_ERROR_INVALID_LENGTH;
     }
     size_t num_bytes = num_bits / 8;
-    rsa_error_t ret = RSA_SUCCESS;
+
     // read num_bits from /dev/urandom
-    FILE *fp = fopen("/dev/urandom", "rb");
-    if (NULL == fp) {
-        perror("Failed to open /dev/urandom");
-        ret = RSA_ERROR_ALLOC_FAILED; // Error: Failed to open /dev/urandom
-        goto exit;
+    unsigned char *buffer = rand_bytes_urandom(num_bytes);
+    if (NULL != buffer) {
+        // Convert the buffer to a GMP number
+        mpz_import(result, num_bytes, MPZ_ENDIAN_MSB_FIRST, sizeof(unsigned char), MPZ_ENDIAN_MSB_FIRST, 0, buffer);
+        free(buffer);
+        return RSA_SUCCESS;
     }
-    unsigned char *buffer = (unsigned char*)malloc(num_bytes);
-    if (NULL == buffer) {
-        perror("Failed to alloc random buffer");
-        ret = RSA_ERROR_ALLOC_FAILED; // Error: Memory allocation failed
-        goto exit;
-    }
-    size_t bytes_read = fread(buffer, 1, num_bytes, fp);
-    if (bytes_read != num_bytes) {
-        printf("Failed to read enough bytes from /dev/urandom: %ld\n", num_bytes);
-        ret = RSA_ERROR_ALLOC_FAILED; // Error: Failed to read enough bytes
-        goto exit;
-    }
-    // Convert the buffer to a GMP number
-    mpz_import(result, bytes_read, 1, sizeof(char), 1, 0, buffer);
-exit:
-    if (NULL != buffer) free(buffer);
-    if (NULL != fp) fclose(fp);
-    return ret;
+    // error case here
+    return RSA_ERROR_ALLOC_FAILED;
 }
 
 rsa_error_t rsa_genkey(rsa_ctx_t *ctx, unsigned int bitlen, unsigned int pub_exponent)
@@ -676,7 +692,7 @@ rsa_error_t rsa_private(rsa_ctx_t *ctx, char *output, size_t olen, const char *i
     mpz_t in, out;
     mpz_inits(in, out, NULL);
     if (RSA_BASE_BINARYDATA == base) {
-        mpz_import(in, ilen, 1, sizeof(char), 1, 0, input); // Import raw bytes assuming big-endian byte order
+        mpz_import(in, ilen, MPZ_ENDIAN_MSB_FIRST, sizeof(char), MPZ_ENDIAN_MSB_FIRST, 0, input); // Import raw bytes assuming big-endian byte order
     } else {
         if (mpz_set_str(in, input, base) != 0) {
             ret = RSA_ERROR_STRING_CONVERSION; // Error: Invalid input format
@@ -688,7 +704,7 @@ rsa_error_t rsa_private(rsa_ctx_t *ctx, char *output, size_t olen, const char *i
         goto exit; // RSA Private key operation
     }
     if (RSA_BASE_BINARYDATA == base) {
-        mpz_export(output, NULL, /*olen,*/ 1, sizeof(char), 1, 0, out); // Export raw bytes assuming big-endian byte order
+        mpz_export(output, NULL, MPZ_ENDIAN_MSB_FIRST, sizeof(char), MPZ_ENDIAN_MSB_FIRST, 0, out); // Export raw bytes assuming big-endian byte order
     } else {
         if (mpz_get_str(output, base, out) != 0) {
             ret = RSA_ERROR_STRING_CONVERSION; // Error: Invalid input format
@@ -734,7 +750,7 @@ rsa_error_t rsa_public(rsa_ctx_t *ctx, char *output, size_t olen, const char *in
     mpz_t in, out;
     mpz_inits(in, out, NULL);
     if (RSA_BASE_BINARYDATA == base) {
-        mpz_import(in, ilen, 1, sizeof(char), 1, 0, input); // Import raw bytes assuming big-endian byte order
+        mpz_import(in, ilen, MPZ_ENDIAN_MSB_FIRST, sizeof(char), MPZ_ENDIAN_MSB_FIRST, 0, input); // Import raw bytes assuming big-endian byte order
     } else {
         if (mpz_set_str(in, input, base) != 0) {
             ret = RSA_ERROR_STRING_CONVERSION; // Error: Invalid input format
@@ -746,7 +762,7 @@ rsa_error_t rsa_public(rsa_ctx_t *ctx, char *output, size_t olen, const char *in
         goto exit; // Error: Public key operation failed
     }
     if (RSA_BASE_BINARYDATA == base) {
-        mpz_export(output, NULL, /*olen,*/ 1, sizeof(char), 1, 0, out); // Export raw bytes assuming big-endian byte order
+        mpz_export(output, NULL, MPZ_ENDIAN_MSB_FIRST, sizeof(char), MPZ_ENDIAN_MSB_FIRST, 0, out); // Export raw bytes assuming big-endian byte order
     } else {
         if (mpz_get_str(output, base, out) != 0) {
             ret = RSA_ERROR_STRING_CONVERSION; // Error: Invalid input format
@@ -755,5 +771,271 @@ rsa_error_t rsa_public(rsa_ctx_t *ctx, char *output, size_t olen, const char *in
     }
 exit:
     mpz_clears(in, out, NULL);
+    return ret;
+}
+
+#define PSS_TRAILER_BYTE (0xbc)
+
+// temp - the MBEDTLS funcs
+/*
+#define mbedtls_sha256_context int
+#define mbedtls_sha256_init(x)
+#define mbedtls_sha256_starts_ret(x, y)
+#define mbedtls_sha256_update_ret(x, y, z)
+#define mbedtls_sha256_finish_ret(x, y)
+#define mbedtls_sha256_ret(a,b,c,d) (0)
+#define mbedtls_sha256_free(x) 
+*/
+
+#include "mbedtls/sha256.h"
+
+// RSA-PSS code - TODO CHATGPT generated, doesn't work yet.
+// MGF1 based on SHA-256 as specified in PKCS#1 v2.2
+// Expands a hash output into a mask of desired length using counter-based iteration
+void mgf1_sha256(unsigned char *mask, size_t mask_len, const unsigned char *seed, size_t seed_len) {
+    unsigned char counter_bytes[4];
+    unsigned char digest[32];
+    unsigned int counter = 0;
+    size_t generated = 0;
+
+    while (generated < mask_len) {
+        // Encode counter as 4 bytes
+        counter_bytes[0] = (counter >> 24) & 0xFF;
+        counter_bytes[1] = (counter >> 16) & 0xFF;
+        counter_bytes[2] = (counter >> 8) & 0xFF;
+        counter_bytes[3] = counter & 0xFF;
+
+        // Hash(seed || counter)
+        mbedtls_sha256_context sha;
+        mbedtls_sha256_init(&sha);
+        mbedtls_sha256_starts(&sha, 0);
+        mbedtls_sha256_update(&sha, seed, seed_len);
+        mbedtls_sha256_update(&sha, counter_bytes, 4);
+        mbedtls_sha256_finish(&sha, digest);
+        mbedtls_sha256_free(&sha);
+
+        // Copy to output
+        size_t to_copy = (mask_len - generated > 32) ? 32 : (mask_len - generated);
+        memcpy(mask + generated, digest, to_copy);
+        generated += to_copy;
+        counter++;
+    }
+}
+
+// RSA-PSS signature generation as specified in PKCS#1 v2.2
+// Inputs: message, private key context, output: signature as mpz_t
+rsa_error_t rsa_pss_sign(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_len, mpz_t signature) {
+    rsa_error_t ret = RSA_SUCCESS;
+    size_t em_bits = ctx->key_size - 1;
+    size_t em_len = (em_bits + 7) / 8;
+    size_t h_len = 32;
+    size_t s_len = h_len;
+    unsigned char *DB = NULL, *db_mask = NULL, *EM = NULL;
+
+    size_t ps_len = em_len - s_len - h_len - 2;
+    size_t db_len = ps_len + 1 + s_len;
+    size_t db_mask_len = em_len - h_len - 1;
+
+    // Stack Buffers
+    unsigned char m_hash[h_len];
+    unsigned char m_prime[8 + h_len + s_len];
+    unsigned char H[h_len];
+
+    // malloc'd buffers
+    unsigned char *salt = NULL;
+
+    mpz_t em_int;
+    mpz_init(em_int);
+
+    // Step 1: Hash the message
+    mbedtls_sha256(msg, msg_len, m_hash, 0);
+    /*if (mbedtls_sha256(msg, msg_len, m_hash, 0) != 0) {
+        ret = -1;
+        goto exit;
+    }*/
+
+    // Step 2: Generate a random salt
+    salt = rand_bytes_urandom(s_len);
+    if (NULL == salt) {
+        ret = -1;
+        goto exit;
+    }
+
+    // Step 3: Create M' = (0x)00 00 00 00 00 00 00 00 || mHash || salt
+    memset(m_prime, 0x00, 8);
+    memcpy(m_prime + 8, m_hash, h_len);
+    memcpy(m_prime + 8 + h_len, salt, s_len);
+
+    // Step 4: Hash M' to get H
+    mbedtls_sha256(m_prime, sizeof(m_prime), H, 0);
+    /*if (mbedtls_sha256_ret(m_prime, sizeof(m_prime), H, 0) != 0) {
+        ret = -1;
+        goto exit;
+    }*/
+
+    // Step 5: Construct padding PS and DB = PS || 0x01 || salt
+    DB = secure_malloc(db_len);
+    if (!DB) {
+        ret = -1;
+        goto exit;
+    }
+    DB[ps_len] = 0x01;
+    memcpy(DB + ps_len + 1, salt, s_len);
+
+    // Step 6: Generate dbMask = MGF1(H, em_len - h_len - 1)
+    db_mask = secure_malloc(db_mask_len);
+    if (!db_mask) {
+        ret = -1;
+        goto exit;
+    }
+    mgf1_sha256(db_mask, em_len - h_len - 1, H, h_len);
+
+    // Step 7: maskedDB = DB XOR dbMask
+    for (size_t i = 0; i < em_len - h_len - 1; i++) {
+        DB[i] ^= db_mask[i];
+    }
+    DB[0] &= 0xFF >> (8 * em_len - em_bits);
+
+    // Step 8: Construct encoded message EM = maskedDB || H || 0xbc
+    EM = secure_malloc(em_len);
+    if (!EM) {
+        ret = -1;
+        goto exit;
+    }
+    memcpy(EM, DB, em_len - h_len - 1);
+    memcpy(EM + em_len - h_len - 1, H, h_len);
+    EM[em_len - 1] = PSS_TRAILER_BYTE;
+
+    // Step 9: Convert EM to integer and perform RSA private operation
+    mpz_import(em_int, em_len, MPZ_ENDIAN_MSB_FIRST, 1, MPZ_ENDIAN_MSB_FIRST, 0, EM);
+
+    ret = rsa_mpz_private(ctx, signature, em_int);
+
+exit:
+    mpz_clear(em_int);
+    free(salt);
+    secure_free(DB, db_len);
+    secure_free(db_mask, db_mask_len);
+    secure_free(EM, em_len);
+    return ret;
+}
+
+// RSA-PSS signature verification as specified in PKCS#1 v2.2
+// Inputs: message, signature, public key context
+// Returns 0 if valid, -1 if invalid
+rsa_error_t rsa_pss_verify(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_len, mpz_t signature) {
+    rsa_error_t ret = RSA_SUCCESS;
+    size_t count = 0;
+    size_t em_bits = ctx->key_size - 1;
+    size_t em_len = (em_bits + 7) / 8;
+    size_t h_len = 32;
+    size_t s_len = h_len;
+    size_t db_mask_len = em_len - h_len - 1;
+    size_t ps_len = db_mask_len - s_len - 1;
+    unsigned char *DB = NULL, *db_mask = NULL, *EM = NULL, *salt = NULL;
+    
+    // stack buffers
+    unsigned char m_hash[h_len];
+    unsigned char H[h_len];
+    unsigned char m_prime[8 + h_len + s_len];
+    unsigned char H_prime[h_len];
+
+    // Step 1: RSA verification: m = s^e mod n
+    mpz_t em_int;
+    mpz_init(em_int);
+
+    ret = rsa_mpz_public(ctx, em_int, signature);
+    if (RSA_SUCCESS != ret)
+    {
+        goto exit;
+    }
+
+    // Step 2: Convert EM to byte string
+    EM = secure_malloc(em_len);
+    if (!EM) {
+        ret = -1;
+        goto exit;
+    }
+    
+    mpz_export(EM, &count, MPZ_ENDIAN_MSB_FIRST, 1, MPZ_ENDIAN_MSB_FIRST, 0, em_int);
+    if (count < em_len) {
+        memmove(EM + (em_len - count), EM, count), memset(EM, 0, em_len - count);
+    }
+
+    // Step 3: Check trailer byte
+    if (EM[em_len - 1] != PSS_TRAILER_BYTE) {
+        ret = -1;
+        goto exit;
+    }
+
+    // Step 4: Hash the message
+    mbedtls_sha256(msg, msg_len, m_hash, 0);
+    /*if (mbedtls_sha256_ret(msg, msg_len, m_hash, 0) != 0) {
+        ret = -1;
+        goto exit;
+    }*/
+
+    // Step 5: Extract H from EM
+    memcpy(H, EM + em_len - h_len - 1, h_len);
+
+    // Step 6: Generate dbMask = MGF1(H, em_len - h_len - 1)
+    db_mask = secure_malloc(db_mask_len);
+    if (!db_mask) {
+        ret = -1;
+        goto exit;
+    }
+    mgf1_sha256(db_mask, db_mask_len, H, h_len);
+
+    // Step 7: Recover DB = maskedDB XOR dbMask
+    DB = secure_malloc(db_mask_len);
+    if (!DB) {
+        ret = -1;
+        goto exit;
+    }
+    for (size_t i = 0; i < db_mask_len; i++) {
+        DB[i] = EM[i] ^ db_mask[i];
+    }
+    DB[0] &= 0xFF >> (8 * em_len - em_bits);
+
+    // Step 8: Verify padding in DB: leading 0x00 bytes, 0x01 separator
+    for (size_t i = 0; i < ps_len; i++) 
+    { 
+        if (DB[i] != 0x00) {
+            ret = -1;
+            goto exit;
+        }
+    }
+    if (DB[ps_len] != 0x01) {
+        ret = -1;
+        goto exit;
+    }
+
+    // Step 9: Extract salt from DB
+    salt = DB + ps_len + 1;
+
+    // Step 10: Compute H' = Hash(0x00 00 00 00 00 00 00 00 || mHash || salt)
+    memset(m_prime, 0, 8);
+    memcpy(m_prime + 8, m_hash, h_len);
+    memcpy(m_prime + 8 + h_len, salt, s_len);
+
+    mbedtls_sha256(m_prime, sizeof(m_prime), H_prime, 0);
+    /*if (mbedtls_sha256_ret(m_prime, sizeof(m_prime), H_prime, 0) != 0) {
+        ret = -1;
+        goto exit;
+    }*/
+
+    // Step 11: Check H == H'
+    if (memcmp(H, H_prime, h_len) != 0) {
+        ret = -1;
+        goto exit;
+    }
+
+    ret = RSA_SUCCESS;
+
+exit:
+    mpz_clear(em_int);
+    secure_free(EM, em_len);
+    secure_free(db_mask, db_mask_len);
+    secure_free(DB, db_mask_len);
     return ret;
 }

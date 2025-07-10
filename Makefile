@@ -1,15 +1,20 @@
 # Compiler and flags
 CC = gcc
 # Add -g for debugging tests if needed
-CFLAGS = -Wall -O3 -march=native -mtune=native -flto -DDEBUG -Isrc/unity -Isrc
+CFLAGS = -Wall -O3 -march=native -mtune=native -flto -DDEBUG -Isrc/unity -Isrc/mbedtls -Isrc
 
 # Directories
 SRC_DIR = src
 BUILD_DIR = build
 UNITY_DIR = $(SRC_DIR)/unity
 TEST_DIR = $(SRC_DIR)/test
+MBEDTLS_DIR = $(SRC_DIR)/mbedtls
 
 # Source files
+
+# MBEDTLS source files
+MBEDTLS_LIB_SRC = $(wildcard $(MBEDTLS_DIR)/*.c)
+
 # Core sources used by both main app and tests
 CORE_SRCS = $(SRC_DIR)/rsa.c $(SRC_DIR)/debug.c
 
@@ -34,11 +39,13 @@ TEST_SRCS = $(TEST_RUNNER_SRC) $(TEST_IMPL_SRCS) $(CORE_SRCS) $(UNITY_LIB_SRC)
 # Need to handle object files for sources in subdirectories (like unity.c) correctly.
 # One way is to have them all land flat in BUILD_DIR.
 MAIN_APP_OBJS = $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(MAIN_APP_ONLY_SRCS)) \
-                $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(CORE_SRCS))
+				$(patsubst $(MBEDTLS_DIR)/%.c,$(BUILD_DIR)/%.o,$(MBEDTLS_LIB_SRC)) \
+                $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(CORE_SRCS)) \
 
 TEST_OBJS = $(patsubst $(TEST_DIR)/%.c,$(BUILD_DIR)/%.o,$(TEST_RUNNER_SRC)) \
             $(patsubst $(TEST_DIR)/%.c,$(BUILD_DIR)/%.o,$(TEST_IMPL_SRCS)) \
             $(patsubst $(TEST_DIR)/%.c,$(BUILD_DIR)/%.o,$(CORE_SRCS)) \
+			$(patsubst $(MBEDTLS_DIR)/%.c,$(BUILD_DIR)/%.o,$(MBEDTLS_LIB_SRC)) \
             $(patsubst $(UNITY_DIR)/%.c,$(BUILD_DIR)/%.o,$(UNITY_LIB_SRC))
 
 
@@ -81,8 +88,13 @@ $(BUILD_DIR)/%.o: $(UNITY_DIR)/%.c | $(BUILD_DIR)
 	@echo "Compiling $< -> $@"
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
+# Compile source files from MBEDTLS_DIR (e.g. src/mbedtls/sha256.c)
+# This rule specifically handles sha256.c from its subdirectory, but all other possible files
+$(BUILD_DIR)/%.o: $(MBEDTLS_DIR)/%.c | $(BUILD_DIR)
+	@echo "Compiling $< -> $@"
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
 # Compile source files from TEST_DIR (e.g. src/test/test_runner.c)
-# This rule specifically handles unity.c from its subdirectory.
 $(BUILD_DIR)/%.o: $(TEST_DIR)/%.c | $(BUILD_DIR)
 	@echo "Compiling $< -> $@"
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@

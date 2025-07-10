@@ -12,6 +12,7 @@ void test_genkey_invalid_size_too_small(void);
 void test_genkey_invalid_size_too_large(void);
 void test_genkey_valid_size_not_power_of_two(void); // Renamed from test_genkey_invalid_size_not_power_of_two based on implementation
 void test_euler_totient_function_with_vectors(void);
+void test_rsa_pss(void);
 
 // Test suites will be run here
 
@@ -28,5 +29,6 @@ int main(void) {
     RUN_TEST(test_genkey_invalid_size_too_large);
     RUN_TEST(test_genkey_valid_size_not_power_of_two); // Per user request
     RUN_TEST(test_euler_totient_function_with_vectors);
+    RUN_TEST(test_rsa_pss);
     return UNITY_END();
 }

@@ -350,4 +350,24 @@ rsa_error_t rsa_private(rsa_ctx_t *ctx, char *output, size_t olen, const char *i
  * @return RSA_SUCCESS on success, or an rsa_error_t code.
  */
 rsa_error_t rsa_public(rsa_ctx_t *ctx, char *output, size_t olen, const char *input, size_t ilen, rsa_base_t base);
+
+/**
+  * @brief Performs RSA-PSS-SHA256 signing on arbitrary data.
+  * @param[in] ctx Pointer to an rsa_ctx_t structure holding a private key.
+  * @param[in] msg Data being verified, of an arbitrary length
+  * @param[in] msg_len Size of the msg buffer.
+  * @param[out] signature Signature in mpz_t format.
+ * @return RSA_SUCCESS if signature created correctly, or an rsa_error_t code.
+ */
+ rsa_error_t rsa_pss_sign(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_len, mpz_t signature);
+
+ /**
+  * @brief Performs RSA-PSS-SHA256 signature validation on arbitrary data.
+  * @param[in] ctx Pointer to an rsa_ctx_t structure holding a public (or private, as E and N are used) key.
+  * @param[in] msg Data being verified, of an arbitrary length
+  * @param[in] msg_len Size of the msg buffer.
+  * @param[in] signature Signature in mpz_t format.
+  * @return RSA_SUCCESS if signature is valid, or an rsa_error_t code.
+  */
+ rsa_error_t rsa_pss_verify(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_len, mpz_t signature);
 #endif // RSA_H
