@@ -775,26 +775,15 @@ exit:
 }
 
 #define PSS_TRAILER_BYTE (0xbc)
-
-// temp - the MBEDTLS funcs
-/*
-#define mbedtls_sha256_context int
-#define mbedtls_sha256_init(x)
-#define mbedtls_sha256_starts_ret(x, y)
-#define mbedtls_sha256_update_ret(x, y, z)
-#define mbedtls_sha256_finish_ret(x, y)
-#define mbedtls_sha256_ret(a,b,c,d) (0)
-#define mbedtls_sha256_free(x) 
-*/
-
 #include "mbedtls/sha256.h"
+#define SHA256_DIGEST_SIZE  (32)
 
-// RSA-PSS code - TODO CHATGPT generated, doesn't work yet.
+// RSA-PSS code - Validating Claude output in progress
 // MGF1 based on SHA-256 as specified in PKCS#1 v2.2
 // Expands a hash output into a mask of desired length using counter-based iteration
 void mgf1_sha256(unsigned char *mask, size_t mask_len, const unsigned char *seed, size_t seed_len) {
     unsigned char counter_bytes[4];
-    unsigned char digest[32];
+    unsigned char digest[SHA256_DIGEST_SIZE];
     unsigned int counter = 0;
     size_t generated = 0;
 
@@ -815,7 +804,7 @@ void mgf1_sha256(unsigned char *mask, size_t mask_len, const unsigned char *seed
         mbedtls_sha256_free(&sha);
 
         // Copy to output
-        size_t to_copy = (mask_len - generated > 32) ? 32 : (mask_len - generated);
+        size_t to_copy = (mask_len - generated > SHA256_DIGEST_SIZE) ? SHA256_DIGEST_SIZE : (mask_len - generated);
         memcpy(mask + generated, digest, to_copy);
         generated += to_copy;
         counter++;
@@ -825,26 +814,25 @@ void mgf1_sha256(unsigned char *mask, size_t mask_len, const unsigned char *seed
 // RSA-PSS signature generation as specified in PKCS#1 v2.2
 // Inputs: message, private key context, output: signature as mpz_t
 rsa_error_t rsa_pss_sign(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_len, mpz_t signature) {
+    const size_t h_len = SHA256_DIGEST_SIZE;
+    const size_t s_len = h_len;
+
     rsa_error_t ret = RSA_SUCCESS;
     size_t em_bits = ctx->key_size - 1;
     size_t em_len = (em_bits + 7) / 8;
-    size_t h_len = 32;
-    size_t s_len = h_len;
-    unsigned char *DB = NULL, *db_mask = NULL, *EM = NULL;
-
     size_t ps_len = em_len - s_len - h_len - 2;
     size_t db_len = ps_len + 1 + s_len;
     size_t db_mask_len = em_len - h_len - 1;
+
+    // Heap Buffers
+    mpz_t em_int;
+    unsigned char *DB = NULL, *db_mask = NULL, *EM = NULL, *salt = NULL;
 
     // Stack Buffers
     unsigned char m_hash[h_len];
     unsigned char m_prime[8 + h_len + s_len];
     unsigned char H[h_len];
 
-    // malloc'd buffers
-    unsigned char *salt = NULL;
-
-    mpz_t em_int;
     mpz_init(em_int);
 
     // Step 1: Hash the message
@@ -857,7 +845,7 @@ rsa_error_t rsa_pss_sign(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_le
     // Step 2: Generate a random salt
     salt = rand_bytes_urandom(s_len);
     if (NULL == salt) {
-        ret = -1;
+        ret = RSA_ERROR_ALLOC_FAILED;
         goto exit;
     }
 
@@ -875,8 +863,8 @@ rsa_error_t rsa_pss_sign(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_le
 
     // Step 5: Construct padding PS and DB = PS || 0x01 || salt
     DB = secure_malloc(db_len);
-    if (!DB) {
-        ret = -1;
+    if (NULL != DB) {
+        ret = RSA_ERROR_ALLOC_FAILED;
         goto exit;
     }
     DB[ps_len] = 0x01;
@@ -884,8 +872,8 @@ rsa_error_t rsa_pss_sign(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_le
 
     // Step 6: Generate dbMask = MGF1(H, em_len - h_len - 1)
     db_mask = secure_malloc(db_mask_len);
-    if (!db_mask) {
-        ret = -1;
+    if (NULL != db_mask) {
+        ret = RSA_ERROR_ALLOC_FAILED;
         goto exit;
     }
     mgf1_sha256(db_mask, em_len - h_len - 1, H, h_len);
@@ -898,8 +886,8 @@ rsa_error_t rsa_pss_sign(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_le
 
     // Step 8: Construct encoded message EM = maskedDB || H || 0xbc
     EM = secure_malloc(em_len);
-    if (!EM) {
-        ret = -1;
+    if (NULL != EM) {
+        ret = RSA_ERROR_ALLOC_FAILED;
         goto exit;
     }
     memcpy(EM, DB, em_len - h_len - 1);
@@ -908,12 +896,11 @@ rsa_error_t rsa_pss_sign(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_le
 
     // Step 9: Convert EM to integer and perform RSA private operation
     mpz_import(em_int, em_len, MPZ_ENDIAN_MSB_FIRST, 1, MPZ_ENDIAN_MSB_FIRST, 0, EM);
-
     ret = rsa_mpz_private(ctx, signature, em_int);
 
 exit:
     mpz_clear(em_int);
-    free(salt);
+    secure_free(salt, s_len);
     secure_free(DB, db_len);
     secure_free(db_mask, db_mask_len);
     secure_free(EM, em_len);
@@ -922,17 +909,24 @@ exit:
 
 // RSA-PSS signature verification as specified in PKCS#1 v2.2
 // Inputs: message, signature, public key context
-// Returns 0 if valid, -1 if invalid
+// Returns RSA_SUCCESS if valid, rsa_error_t if invalid
 rsa_error_t rsa_pss_verify(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_len, mpz_t signature) {
+    const size_t h_len = SHA256_DIGEST_SIZE;
+    const size_t s_len = h_len;
+
     rsa_error_t ret = RSA_SUCCESS;
     size_t count = 0;
     size_t em_bits = ctx->key_size - 1;
     size_t em_len = (em_bits + 7) / 8;
-    size_t h_len = 32;
-    size_t s_len = h_len;
     size_t db_mask_len = em_len - h_len - 1;
     size_t ps_len = db_mask_len - s_len - 1;
-    unsigned char *DB = NULL, *db_mask = NULL, *EM = NULL, *salt = NULL;
+
+    // Heap Buffers
+    mpz_t em_int;
+    unsigned char *DB = NULL, *db_mask = NULL, *EM = NULL;
+
+    // Just a reference pointer - don't free
+    unsigned char *salt = NULL;
     
     // stack buffers
     unsigned char m_hash[h_len];
@@ -941,9 +935,7 @@ rsa_error_t rsa_pss_verify(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_
     unsigned char H_prime[h_len];
 
     // Step 1: RSA verification: m = s^e mod n
-    mpz_t em_int;
     mpz_init(em_int);
-
     ret = rsa_mpz_public(ctx, em_int, signature);
     if (RSA_SUCCESS != ret)
     {
@@ -952,8 +944,8 @@ rsa_error_t rsa_pss_verify(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_
 
     // Step 2: Convert EM to byte string
     EM = secure_malloc(em_len);
-    if (!EM) {
-        ret = -1;
+    if (NULL != EM) {
+        ret = RSA_ERROR_ALLOC_FAILED;
         goto exit;
     }
     
@@ -964,7 +956,7 @@ rsa_error_t rsa_pss_verify(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_
 
     // Step 3: Check trailer byte
     if (EM[em_len - 1] != PSS_TRAILER_BYTE) {
-        ret = -1;
+        ret = RSA_ERROR_INVALID_SIGNATURE;
         goto exit;
     }
 
@@ -980,16 +972,16 @@ rsa_error_t rsa_pss_verify(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_
 
     // Step 6: Generate dbMask = MGF1(H, em_len - h_len - 1)
     db_mask = secure_malloc(db_mask_len);
-    if (!db_mask) {
-        ret = -1;
+    if (NULL != db_mask) {
+        ret = RSA_ERROR_ALLOC_FAILED;
         goto exit;
     }
     mgf1_sha256(db_mask, db_mask_len, H, h_len);
 
     // Step 7: Recover DB = maskedDB XOR dbMask
     DB = secure_malloc(db_mask_len);
-    if (!DB) {
-        ret = -1;
+    if (NULL != DB) {
+        ret = RSA_ERROR_ALLOC_FAILED;
         goto exit;
     }
     for (size_t i = 0; i < db_mask_len; i++) {
@@ -1001,12 +993,12 @@ rsa_error_t rsa_pss_verify(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_
     for (size_t i = 0; i < ps_len; i++) 
     { 
         if (DB[i] != 0x00) {
-            ret = -1;
+            ret = RSA_ERROR_INVALID_SIGNATURE;
             goto exit;
         }
     }
     if (DB[ps_len] != 0x01) {
-        ret = -1;
+        ret = RSA_ERROR_INVALID_SIGNATURE;
         goto exit;
     }
 
@@ -1026,7 +1018,7 @@ rsa_error_t rsa_pss_verify(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_
 
     // Step 11: Check H == H'
     if (memcmp(H, H_prime, h_len) != 0) {
-        ret = -1;
+        ret = RSA_ERROR_INVALID_SIGNATURE;
         goto exit;
     }
 

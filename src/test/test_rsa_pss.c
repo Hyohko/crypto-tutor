@@ -47,13 +47,14 @@ void test_rsa_pss(void) {
 
     for (int i = 0; i < 10; i++) {
         // create test data
-        unsigned char *data = rand_bytes_urandom(10000);
+        const size_t BUFSIZE = 10000;
+        unsigned char *data = rand_bytes_urandom(BUFSIZE);
         mpz_t signature;
         mpz_init(signature);
 
-        rsa_error_t result = rsa_pss_sign(&privkey, data, 10000, signature);
+        rsa_error_t result = rsa_pss_sign(&privkey, data, BUFSIZE, signature);
         TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS, result, "rsa_pss_sign failed");
-        result = rsa_pss_verify(&pubkey, data, 10000, signature);
+        result = rsa_pss_verify(&pubkey, data, BUFSIZE, signature);
         TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS, result, "rsa_pss_verify failed");
         free(data);
         mpz_clear(signature);
