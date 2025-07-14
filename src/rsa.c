@@ -31,6 +31,7 @@ For more information, please refer to <https://unlicense.org>
 #include <time.h>
 #include <sys/time.h>
 #include <stdbool.h>
+#include "test/test_common.h"
 
 #define MILLER_RABIN_ITERATIONS 50
 
@@ -449,7 +450,7 @@ rsa_error_t rsa_mpz_gen_random_fast(mpz_t result, mp_bitcnt_t num_bits)
     return RSA_SUCCESS;
 }
 
-static unsigned char *rand_bytes_urandom(size_t num_bytes) {
+unsigned char *rand_bytes_urandom(size_t num_bytes) {
     unsigned char *buf = NULL;
     FILE *fp = fopen("/dev/urandom", "rb");
     if (NULL == fp) {
@@ -836,11 +837,12 @@ rsa_error_t rsa_pss_sign(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_le
     mpz_init(em_int);
 
     // Step 1: Hash the message
-    mbedtls_sha256(msg, msg_len, m_hash, 0);
-    /*if (mbedtls_sha256(msg, msg_len, m_hash, 0) != 0) {
-        ret = -1;
-        goto exit;
-    }*/
+    mbedtls_sha256_context sha_ctx;
+    mbedtls_sha256_init(&sha_ctx);
+    mbedtls_sha256_starts(&sha_ctx, 0);
+    mbedtls_sha256_update(&sha_ctx, msg, msg_len);
+    mbedtls_sha256_finish(&sha_ctx, m_hash);
+    mbedtls_sha256_free(&sha_ctx);
 
     // Step 2: Generate a random salt
     salt = rand_bytes_urandom(s_len);
@@ -855,15 +857,15 @@ rsa_error_t rsa_pss_sign(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_le
     memcpy(m_prime + 8 + h_len, salt, s_len);
 
     // Step 4: Hash M' to get H
-    mbedtls_sha256(m_prime, sizeof(m_prime), H, 0);
-    /*if (mbedtls_sha256_ret(m_prime, sizeof(m_prime), H, 0) != 0) {
-        ret = -1;
-        goto exit;
-    }*/
+    mbedtls_sha256_init(&sha_ctx);
+    mbedtls_sha256_starts(&sha_ctx, 0);
+    mbedtls_sha256_update(&sha_ctx, m_prime, sizeof(m_prime));
+    mbedtls_sha256_finish(&sha_ctx, H);
+    mbedtls_sha256_free(&sha_ctx);
 
     // Step 5: Construct padding PS and DB = PS || 0x01 || salt
     DB = secure_malloc(db_len);
-    if (NULL != DB) {
+    if (NULL == DB) {
         ret = RSA_ERROR_ALLOC_FAILED;
         goto exit;
     }
@@ -872,7 +874,7 @@ rsa_error_t rsa_pss_sign(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_le
 
     // Step 6: Generate dbMask = MGF1(H, em_len - h_len - 1)
     db_mask = secure_malloc(db_mask_len);
-    if (NULL != db_mask) {
+    if (NULL == db_mask) {
         ret = RSA_ERROR_ALLOC_FAILED;
         goto exit;
     }
@@ -886,7 +888,7 @@ rsa_error_t rsa_pss_sign(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_le
 
     // Step 8: Construct encoded message EM = maskedDB || H || 0xbc
     EM = secure_malloc(em_len);
-    if (NULL != EM) {
+    if (NULL == EM) {
         ret = RSA_ERROR_ALLOC_FAILED;
         goto exit;
     }
@@ -944,7 +946,7 @@ rsa_error_t rsa_pss_verify(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_
 
     // Step 2: Convert EM to byte string
     EM = secure_malloc(em_len);
-    if (NULL != EM) {
+    if (NULL == EM) {
         ret = RSA_ERROR_ALLOC_FAILED;
         goto exit;
     }
@@ -961,18 +963,19 @@ rsa_error_t rsa_pss_verify(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_
     }
 
     // Step 4: Hash the message
-    mbedtls_sha256(msg, msg_len, m_hash, 0);
-    /*if (mbedtls_sha256_ret(msg, msg_len, m_hash, 0) != 0) {
-        ret = -1;
-        goto exit;
-    }*/
+    mbedtls_sha256_context sha_ctx;
+    mbedtls_sha256_init(&sha_ctx);
+    mbedtls_sha256_starts(&sha_ctx, 0);
+    mbedtls_sha256_update(&sha_ctx, msg, msg_len);
+    mbedtls_sha256_finish(&sha_ctx, m_hash);
+    mbedtls_sha256_free(&sha_ctx);
 
     // Step 5: Extract H from EM
     memcpy(H, EM + em_len - h_len - 1, h_len);
 
     // Step 6: Generate dbMask = MGF1(H, em_len - h_len - 1)
     db_mask = secure_malloc(db_mask_len);
-    if (NULL != db_mask) {
+    if (NULL == db_mask) {
         ret = RSA_ERROR_ALLOC_FAILED;
         goto exit;
     }
@@ -980,7 +983,7 @@ rsa_error_t rsa_pss_verify(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_
 
     // Step 7: Recover DB = maskedDB XOR dbMask
     DB = secure_malloc(db_mask_len);
-    if (NULL != DB) {
+    if (NULL == DB) {
         ret = RSA_ERROR_ALLOC_FAILED;
         goto exit;
     }
@@ -1010,11 +1013,11 @@ rsa_error_t rsa_pss_verify(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_
     memcpy(m_prime + 8, m_hash, h_len);
     memcpy(m_prime + 8 + h_len, salt, s_len);
 
-    mbedtls_sha256(m_prime, sizeof(m_prime), H_prime, 0);
-    /*if (mbedtls_sha256_ret(m_prime, sizeof(m_prime), H_prime, 0) != 0) {
-        ret = -1;
-        goto exit;
-    }*/
+    mbedtls_sha256_init(&sha_ctx);
+    mbedtls_sha256_starts(&sha_ctx, 0);
+    mbedtls_sha256_update(&sha_ctx, m_prime, sizeof(m_prime));
+    mbedtls_sha256_finish(&sha_ctx, H_prime);
+    mbedtls_sha256_free(&sha_ctx);
 
     // Step 11: Check H == H'
     if (memcmp(H, H_prime, h_len) != 0) {
