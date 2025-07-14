@@ -837,12 +837,7 @@ rsa_error_t rsa_pss_sign(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_le
     mpz_init(em_int);
 
     // Step 1: Hash the message
-    mbedtls_sha256_context sha_ctx;
-    mbedtls_sha256_init(&sha_ctx);
-    mbedtls_sha256_starts(&sha_ctx, 0);
-    mbedtls_sha256_update(&sha_ctx, msg, msg_len);
-    mbedtls_sha256_finish(&sha_ctx, m_hash);
-    mbedtls_sha256_free(&sha_ctx);
+    mbedtls_sha256(msg, msg_len, m_hash, 0);
 
     // Step 2: Generate a random salt
     salt = rand_bytes_urandom(s_len);
@@ -857,11 +852,7 @@ rsa_error_t rsa_pss_sign(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_le
     memcpy(m_prime + 8 + h_len, salt, s_len);
 
     // Step 4: Hash M' to get H
-    mbedtls_sha256_init(&sha_ctx);
-    mbedtls_sha256_starts(&sha_ctx, 0);
-    mbedtls_sha256_update(&sha_ctx, m_prime, sizeof(m_prime));
-    mbedtls_sha256_finish(&sha_ctx, H);
-    mbedtls_sha256_free(&sha_ctx);
+    mbedtls_sha256(m_prime, sizeof(m_prime), H, 0);
 
     // Step 5: Construct padding PS and DB = PS || 0x01 || salt
     DB = secure_malloc(db_len);
@@ -963,12 +954,7 @@ rsa_error_t rsa_pss_verify(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_
     }
 
     // Step 4: Hash the message
-    mbedtls_sha256_context sha_ctx;
-    mbedtls_sha256_init(&sha_ctx);
-    mbedtls_sha256_starts(&sha_ctx, 0);
-    mbedtls_sha256_update(&sha_ctx, msg, msg_len);
-    mbedtls_sha256_finish(&sha_ctx, m_hash);
-    mbedtls_sha256_free(&sha_ctx);
+    mbedtls_sha256(msg, msg_len, m_hash, 0);
 
     // Step 5: Extract H from EM
     memcpy(H, EM + em_len - h_len - 1, h_len);
@@ -1013,11 +999,7 @@ rsa_error_t rsa_pss_verify(rsa_ctx_t *ctx, const unsigned char *msg, size_t msg_
     memcpy(m_prime + 8, m_hash, h_len);
     memcpy(m_prime + 8 + h_len, salt, s_len);
 
-    mbedtls_sha256_init(&sha_ctx);
-    mbedtls_sha256_starts(&sha_ctx, 0);
-    mbedtls_sha256_update(&sha_ctx, m_prime, sizeof(m_prime));
-    mbedtls_sha256_finish(&sha_ctx, H_prime);
-    mbedtls_sha256_free(&sha_ctx);
+    mbedtls_sha256(m_prime, sizeof(m_prime), H_prime, 0);
 
     // Step 11: Check H == H'
     if (memcmp(H, H_prime, h_len) != 0) {
