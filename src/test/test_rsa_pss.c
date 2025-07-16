@@ -36,6 +36,39 @@ void test_rsa_pss_sign_verify_happy_path(void) {
     rsa_free(&privkey);
 }
 
+void test_rsa_pss_sign_verify_generate_keys(void) {
+    for (int i = 0; i < 10; i++) {
+        rsa_error_t result = RSA_SUCCESS;
+        rsa_ctx_t pubkey;
+        rsa_ctx_t privkey;
+
+        rsa_init(&pubkey);
+        rsa_init(&privkey);
+
+        result = rsa_genkey(&privkey, 1024, 0);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS, result, "rsa_genkey failed");
+        result = rsa_pubkey_from_private(&pubkey, &privkey);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS, result, "rsa_pubkey_from_private failed");
+
+        // create test data
+        const size_t BUFSIZE = 10000;
+        unsigned char *data = rand_bytes_urandom(BUFSIZE);
+        mpz_t signature;
+        mpz_init(signature);
+
+        result = rsa_pss_sign(&privkey, data, BUFSIZE, signature);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS, result, "rsa_pss_sign failed");
+
+        result = rsa_pss_verify(&pubkey, data, BUFSIZE, signature);
+        TEST_ASSERT_EQUAL_INT_MESSAGE(RSA_SUCCESS, result, "rsa_pss_verify failed");
+
+        free(data);
+        mpz_clear(signature);
+        rsa_free(&pubkey);
+        rsa_free(&privkey);
+    }
+}
+
 void test_rsa_pss_verify_modified_message(void) {
     rsa_ctx_t pubkey;
     rsa_ctx_t privkey;

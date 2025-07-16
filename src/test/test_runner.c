@@ -13,6 +13,7 @@ void test_genkey_invalid_size_too_large(void);
 void test_genkey_valid_size_not_power_of_two(void); // Renamed from test_genkey_invalid_size_not_power_of_two based on implementation
 void test_euler_totient_function_with_vectors(void);
 void test_rsa_pss_sign_verify_happy_path(void);
+void test_rsa_pss_sign_verify_generate_keys(void);
 void test_rsa_pss_verify_modified_message(void);
 void test_rsa_pss_verify_modified_signature(void);
 void test_rsa_pss_zero_length_message(void);
@@ -33,6 +34,7 @@ int main(void) {
     RUN_TEST(test_genkey_valid_size_not_power_of_two); // Per user request
     RUN_TEST(test_euler_totient_function_with_vectors);
     RUN_TEST(test_rsa_pss_sign_verify_happy_path);
+    RUN_TEST(test_rsa_pss_sign_verify_generate_keys);
     RUN_TEST(test_rsa_pss_verify_modified_message);
     RUN_TEST(test_rsa_pss_verify_modified_signature);
     RUN_TEST(test_rsa_pss_zero_length_message);

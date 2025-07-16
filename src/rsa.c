@@ -343,19 +343,19 @@ error_exit:
     return ret;
 }
 
-rsa_error_t rsa_pubkey_from_private(rsa_ctx_t *pubkey, const rsa_ctx_t *privkey)
+rsa_error_t rsa_pubkey_from_private(rsa_ctx_t *public_key, const rsa_ctx_t *private_key)
 {
-    if (NULL == pubkey || NULL == privkey ) {
+    if (NULL == public_key || NULL == private_key ) {
         return RSA_ERROR_INVALID_ARGUMENTS; // Error: Invalid input
     }
-    if (RSA_PRIVATE != privkey->is_private || RSA_KEY_NOT_SET != pubkey->is_private) {
+    if (RSA_PRIVATE != private_key->is_private || RSA_KEY_NOT_SET != public_key->is_private) {
         return RSA_ERROR_INVALID_CONTEXT; // Error: Context not initialized before setting the key
     }
 
-    mpz_set(pubkey->n, privkey->n);
-    mpz_set(pubkey->e, privkey->e);
-    pubkey->is_private = RSA_PUBLIC;
-    pubkey->key_size = privkey->key_size;
+    mpz_set(public_key->n, private_key->n);
+    mpz_set(public_key->e, private_key->e);
+    public_key->is_private = RSA_PUBLIC;
+    public_key->key_size = private_key->key_size;
     return RSA_SUCCESS;
 }
 
