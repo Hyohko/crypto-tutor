@@ -44,7 +44,7 @@ For more information, please refer to <https://unlicense.org>
 ****************************************************/
 
 // Force writing zeroes to newly-allocated blocks of memory
-static void * secure_malloc(size_t alloc_size){
+static void * secure_malloc(size_t alloc_size) {
     void *ret = malloc(alloc_size);
     if(NULL == ret)
         exit(1); // According to GMP specs, terminate program. GMP doesn't handle alloc errors
@@ -54,8 +54,7 @@ static void * secure_malloc(size_t alloc_size){
 }
 
 // Force writing zeroes before deallocating memory
-static void secure_free(void *ptr, size_t size)
-{
+static void secure_free(void *ptr, size_t size) {
     if(NULL != ptr)
     {
         // non-optimizable zero-ing out of the buffer
@@ -92,8 +91,7 @@ static void * secure_realloc(void *ptr, size_t old_size, size_t new_size) {
     }
 }
 
-static rsa_error_t rsa_genprime(mpz_t prime, mp_bitcnt_t num_bits, bool is_secure)
-{
+static rsa_error_t rsa_genprime(mpz_t prime, mp_bitcnt_t num_bits, bool is_secure) {
     if (NULL == prime || num_bits < 2 || num_bits > RSA_KEYSIZE_MAX) {
         return RSA_ERROR_INVALID_ARGUMENTS;
     }
@@ -111,8 +109,7 @@ static rsa_error_t rsa_genprime(mpz_t prime, mp_bitcnt_t num_bits, bool is_secur
 // the 200 most significant bits and compare the hamming distance. less than 20 bits
 // difference means the primes are too close to the square root of the modulus, making
 // factoring way easier.
-static rsa_error_t rsa_primes_too_close(mpz_t p, mpz_t q)
-{
+static rsa_error_t rsa_primes_too_close(mpz_t p, mpz_t q) {
     if (NULL == p || NULL == q) {
         return RSA_ERROR_INVALID_ARGUMENTS;  // Treat invalid input as "too close"
     }
