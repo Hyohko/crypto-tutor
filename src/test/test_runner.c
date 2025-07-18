@@ -1,5 +1,5 @@
-#include "unity/unity.h"
 #include "rsa.h"
+#include "unity/unity.h"
 
 // Forward declare test functions
 void test_all_nist_private_exponent_vectors(void);
@@ -10,7 +10,9 @@ void test_random_sign_verify_enc_dec_with_generated_keys_4096(void);
 void test_genkey_1024_multiple_times(void);
 void test_genkey_invalid_size_too_small(void);
 void test_genkey_invalid_size_too_large(void);
-void test_genkey_valid_size_not_power_of_two(void); // Renamed from test_genkey_invalid_size_not_power_of_two based on implementation
+void test_genkey_valid_size_not_power_of_two(void
+);  // Renamed from test_genkey_invalid_size_not_power_of_two based on
+    // implementation
 void test_euler_totient_function_with_vectors(void);
 void test_rsa_pss_sign_verify_happy_path(void);
 void test_rsa_pss_sign_verify_generate_keys(void);
@@ -31,7 +33,7 @@ int main(void) {
     RUN_TEST(test_genkey_1024_multiple_times);
     RUN_TEST(test_genkey_invalid_size_too_small);
     RUN_TEST(test_genkey_invalid_size_too_large);
-    RUN_TEST(test_genkey_valid_size_not_power_of_two); // Per user request
+    RUN_TEST(test_genkey_valid_size_not_power_of_two);  // Per user request
     RUN_TEST(test_euler_totient_function_with_vectors);
     RUN_TEST(test_rsa_pss_sign_verify_happy_path);
     RUN_TEST(test_rsa_pss_sign_verify_generate_keys);

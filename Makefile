@@ -80,6 +80,7 @@ $(TARGET_TEST): $(TEST_OBJS)
 # Compile source files from SRC_DIR (e.g. src/main.c, src/rsa.c, src/test_*.c)
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
 	@echo "Compiling $< -> $@"
+	clang-format $< -i
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 # Compile source files from UNITY_DIR (e.g. src/unity/unity.c)
@@ -97,6 +98,7 @@ $(BUILD_DIR)/%.o: $(MBEDTLS_DIR)/%.c | $(BUILD_DIR)
 # Compile source files from TEST_DIR (e.g. src/test/test_runner.c)
 $(BUILD_DIR)/%.o: $(TEST_DIR)/%.c | $(BUILD_DIR)
 	@echo "Compiling $< -> $@"
+	clang-format $< -i
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 # Create build directory if it doesn't exist
