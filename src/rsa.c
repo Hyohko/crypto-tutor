@@ -41,6 +41,11 @@ For more information, please refer to <https://unlicense.org>
 #define MPZ_ENDIAN_LSB_FIRST  (-1)
 #define MPZ_ENDIAN_CPU_NATIVE (0)
 
+#ifdef WIN32
+#define secure_zero(ptr,len)    SecureZeroMemory((ptr),(len))
+#else // Linux environments - TODO: make more general for other environments
+#define secure_zero(ptr, len)   explicit_bzero((ptr),(len))
+#endif
 /****************************************************
     Static / private functions
 ****************************************************/
@@ -52,7 +57,7 @@ static void *secure_malloc(size_t alloc_size) {
         exit(1);  // According to GMP specs, terminate program. GMP doesn't
                   // handle alloc errors
     // non-optimizable zero-ing out of the buffer
-    explicit_bzero(ret, alloc_size);
+    secure_zero(ret, alloc_size);
     return ret;
 }
 
@@ -60,35 +65,40 @@ static void *secure_malloc(size_t alloc_size) {
 static void secure_free(void *ptr, size_t size) {
     if (NULL != ptr) {
         // non-optimizable zero-ing out of the buffer
-        explicit_bzero((char *)ptr, size);
+        secure_zero((char *)ptr, size);
         free(ptr);
     }
 }
 
 static void *secure_realloc(void *ptr, size_t old_size, size_t new_size) {
-    // GMP says the first two cases are prevented in its library. Are they?
-    if (NULL == ptr) {
-        return ptr;
-    } else if (0 == new_size) {  // zero-size is undefined behavior. Return NULL
-                                 // but leave ptr alone
-        return NULL;
-    } else if (new_size == old_size) {  // No change in size.
-        return ptr;
-    } else if (new_size < old_size) {
-        // erase the end of the memory block, the delta between new_size and
-        // old_size don't allocate new memory.
-        void *edit = (void *)((char *)ptr + new_size + 1);
-        size_t to_zero = old_size - new_size - 1;
-        explicit_bzero(edit, to_zero);
-        return ptr;
-    } else {  // here, new_size > old_size
-        // By GMP specs, if secure_malloc fails, the program will exit(1), so
-        // don't bother checking the return.
-        void *temp = secure_malloc(new_size);  // zeroed-out buffer
-        memcpy(temp, ptr, old_size);
-        secure_free(ptr, old_size);
-        return (void *)temp;
+      if (NULL == ptr) {
+          return secure_malloc(new_size);  // realloc(NULL, n) == malloc(n)
+      }
+      if (0 == new_size) {
+          secure_free(ptr, old_size);
+          return NULL;
+      }
+      if (new_size == old_size) {
+          return ptr;
+      }
+
+      void *new_ptr = secure_malloc(new_size); // Now, if secure_malloc() fails, it will just exit(1), but we do this for code hygiene
+      if (new_ptr) {
+          memcpy(new_ptr, ptr, (new_size < old_size) ? new_size : old_size);
+          secure_free(ptr, old_size);
+      }
+      return new_ptr;
+  }
+
+/// Constant-time memcmp implementation
+static int ct_memcmp(const void *a, const void *b, size_t len) {
+    const volatile unsigned char *x = a;  // volatile prevents optimization
+    const volatile unsigned char *y = b;
+    unsigned char result = 0;
+    for (size_t i = 0; i < len; i++) {
+        result |= x[i] ^ y[i];
     }
+     return result != 0;
 }
 
 static rsa_error_t rsa_genprime(
@@ -111,6 +121,8 @@ static rsa_error_t rsa_genprime(
 // leaving the 200 most significant bits and compare the hamming distance. less
 // than 20 bits difference means the primes are too close to the square root of
 // the modulus, making factoring way easier.
+#define MOST_SIG_BITS_200    (200)
+#define MIN_HAMMING_DIST     (20)
 static rsa_error_t rsa_primes_too_close(mpz_t p, mpz_t q) {
     if (NULL == p || NULL == q) {
         return RSA_ERROR_INVALID_ARGUMENTS;  // Treat invalid input as "too
@@ -118,18 +130,18 @@ static rsa_error_t rsa_primes_too_close(mpz_t p, mpz_t q) {
     }
     mp_bitcnt_t p_size = mpz_sizeinbase(p, 2);
     mp_bitcnt_t q_size = mpz_sizeinbase(q, 2);
-    if (p_size <= 200 || q_size <= 200) {
+    if (p_size <= MOST_SIG_BITS_200 || q_size <= MOST_SIG_BITS_200) {
         // in practice, should never happen, but check anyway.
         return RSA_ERROR_INVALID_PRIME_TOO_SMALL;
     }
 
     mpz_t p_quotient, q_quotient;
     mpz_inits(p_quotient, q_quotient, NULL);
-    mpz_fdiv_q_2exp(p_quotient, p, p_size - 200);
-    mpz_fdiv_q_2exp(q_quotient, q, q_size - 200);
+    mpz_fdiv_q_2exp(p_quotient, p, p_size - MOST_SIG_BITS_200);
+    mpz_fdiv_q_2exp(q_quotient, q, q_size - MOST_SIG_BITS_200);
     mp_bitcnt_t hamdist = mpz_hamdist(p_quotient, q_quotient);
     mpz_clears(p_quotient, q_quotient, NULL);
-    if (hamdist < 20) {
+    if (hamdist < MIN_HAMMING_DIST) {
         return RSA_ERROR_PRIMES_TOO_CLOSE;  // Error: P and Q are too close
     }
     return RSA_SUCCESS;  // Success: P and Q are not too close
@@ -150,7 +162,7 @@ void rsa_init(rsa_ctx_t *ctx) {
     if (NULL == ctx) {
         return;  // Avoid SEGFAULT
     }
-    explicit_bzero(ctx, sizeof(rsa_ctx_t));  // Initialize context to zero
+    secure_zero(ctx, sizeof(rsa_ctx_t));  // Initialize context to zero
     mpz_inits(ctx->p, ctx->q, ctx->d, ctx->n, ctx->e, NULL);
     ctx->is_private = RSA_KEY_NOT_SET;  // Initialize to invalid key state
 }
@@ -176,7 +188,7 @@ void rsa_free(rsa_ctx_t *ctx) {
         return;  // Avoid SEGFAULT
     }
     mpz_clears(ctx->p, ctx->q, ctx->d, ctx->n, ctx->e, NULL);
-    explicit_bzero(ctx, sizeof(rsa_ctx_t));  // Initialize context to zero
+    secure_zero(ctx, sizeof(rsa_ctx_t));  // Initialize context to zero
     ctx->is_private = RSA_KEY_NOT_SET;       // Initialize to invalid key state
 }
 
@@ -221,7 +233,7 @@ rsa_error_t rsa_mpz_set_pubkey(
     ctx->is_private = RSA_PUBLIC;
     ctx->key_size = mpz_sizeinbase(ctx->n, 2);
     // round up key_size to the next multiple of 8
-    ctx->key_size += (ctx->key_size % 8);
+    ctx->key_size = (ctx->key_size + 7) & ~7;
 
     rsa_error_t ret = rsa_validate_key_components(ctx);
     if (RSA_SUCCESS != ret) {
@@ -312,7 +324,7 @@ rsa_error_t rsa_set_privkey(
         return ret;  // Error: Invalid base
     }
 
-    if (NULL == ctx || prime_p == NULL || prime_q == NULL) {
+    if (NULL == ctx || NULL == prime_p || NULL == prime_q) {
         return RSA_ERROR_INVALID_ARGUMENTS;  // Error: Invalid input
     }
     if (RSA_KEY_NOT_SET != ctx->is_private) {
@@ -453,6 +465,7 @@ const char *rsa_strerror(int err_code) {
     }
 }
 
+// Deprecated - not secure. Just a function for practicing RNG.
 rsa_error_t rsa_mpz_gen_random_fast(mpz_t result, mp_bitcnt_t num_bits) {
     if (NULL == result) {
         return RSA_ERROR_INVALID_ARGUMENTS;
@@ -477,6 +490,7 @@ rsa_error_t rsa_mpz_gen_random_fast(mpz_t result, mp_bitcnt_t num_bits) {
     return RSA_SUCCESS;
 }
 
+// TODO - add #define case for Windows CryptGenRandom or BCryptGenRandom
 unsigned char *rand_bytes_urandom(size_t num_bytes) {
     unsigned char *buf = NULL;
     FILE *fp = fopen("/dev/urandom", "rb");
@@ -492,7 +506,7 @@ unsigned char *rand_bytes_urandom(size_t num_bytes) {
     size_t bytes_read = fread(buf, 1, num_bytes, fp);
     if (bytes_read != num_bytes) {
         printf(
-            "Failed to read enough bytes from /dev/urandom: %ld\n", num_bytes
+            "Failed to read enough bytes from /dev/urandom: %zu\n", num_bytes
         );
         free(buf);
         buf = NULL;
@@ -859,7 +873,7 @@ rsa_error_t rsa_public(
             MPZ_ENDIAN_MSB_FIRST, 0, out
         );  // Export raw bytes assuming big-endian byte order
     } else {
-        if (mpz_get_str(output, base, out) != 0) {
+        if (NULL == mpz_get_str(output, base, out)) {
             ret = RSA_ERROR_STRING_CONVERSION;  // Error: Invalid input format
             goto exit;
         }
@@ -1051,8 +1065,8 @@ rsa_error_t rsa_pss_verify(
         EM, &count, MPZ_ENDIAN_MSB_FIRST, 1, MPZ_ENDIAN_MSB_FIRST, 0, em_int
     );
     if (count < em_len) {
-        memmove(EM + (em_len - count), EM, count),
-            memset(EM, 0, em_len - count);
+        memmove(EM + (em_len - count), EM, count);
+        memset(EM, 0, em_len - count);
     }
 
     // Step 3: Check trailer byte
@@ -1108,8 +1122,8 @@ rsa_error_t rsa_pss_verify(
 
     mbedtls_sha256(m_prime, sizeof(m_prime), H_prime, 0);
 
-    // Step 11: Check H == H'
-    if (memcmp(H, H_prime, h_len) != 0) {
+    // Step 11: Check H == H' - perform in constant time to prevent timing attacks
+    if (ct_memcmp(H, H_prime, h_len) != 0) {
         ret = RSA_ERROR_INVALID_SIGNATURE;
         goto exit;
     }
