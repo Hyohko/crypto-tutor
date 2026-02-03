@@ -181,6 +181,10 @@ typedef struct {
     mpz_t d; /**< Private exponent. */
     mpz_t n; /**< Modulus (n = p * q). */
     mpz_t e; /**< Public exponent. */
+    // Chinese Remainder Theorem - Precomputed values
+    mpz_t dp; /**< First half of the CRT private exponent -> d mod (p - 1). */
+    mpz_t dq; /**< First half of the CRT private exponent -> d mod (q - 1). */
+    mpz_t q_inv; /**< q^(-1) mod p. */
     mp_bitcnt_t key_size; /**< Size of the key (modulus n) in bits. */
     rsa_key_type_t
         is_private; /**< Flag indicating if the key is private (RSA_PRIVATE),
@@ -237,7 +241,7 @@ rsa_error_t rsa_genkey(
 
 /**
  * @brief Prints debugging information about the RSA key context to standard
- * output. Prints P, Q, D, N, E (in hex), key_size, and is_private.
+ * output. Prints P, Q, D, N, E (in hex), DP, DQ, Q_INV, key_size, and is_private.
  * @param[in] ctx Pointer to the rsa_ctx_t structure to debug.
  */
 void rsa_debug(rsa_ctx_t *ctx);
