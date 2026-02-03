@@ -744,29 +744,29 @@ rsa_error_t rsa_mpz_private(rsa_ctx_t *ctx, mpz_t output, const mpz_t input) {
     }
 
 #if defined(RSA_NO_BLINDING)
-    mpz_t m1, m2, h;
-    mpz_inits(m1, m2, h, NULL);
+    mpz_t mp, mq, h;
+    mpz_inits(mp, mq, h, NULL);
 
     // Compute P component of the message => m ^ dp mod p
-    mpz_powm_sec(m1, input, ctx->dp, ctx->p);
+    mpz_powm_sec(mp, input, ctx->dp, ctx->p);
     // Compute q component of the message => m ^ dq mod q
-    mpz_powm_sec(m2, input, ctx->dq, ctx->q);
+    mpz_powm_sec(mq, input, ctx->dq, ctx->q);
 
     // Garner's formula:
-    //    h = (q_inv * (m1 - m2)) mod p
-    //    output = m2 + (h * q)
-    mpz_sub(h, m1, m2);
+    //    h = (q_inv * (mp - mq)) mod p
+    //    output = mq + (h * q)
+    mpz_sub(h, mp, mq);
     mpz_mul(h, ctx->q_inv, h);
     mpz_mod(h, h, ctx->p);
     mpz_mul(h, h, ctx->q);
-    mpz_add(output, m2, h);
-    mpz_clears(m1, m2, h, NULL);
+    mpz_add(output, mq, h);
+    mpz_clears(mp, mq, h, NULL);
 #else
     {  // scope to clear the stack
-        mpz_t r, s, blind_input, temp, should_be_one, r_inv, blind_output, m1,
-            m2, h;
+        mpz_t r, s, blind_input, temp, should_be_one, r_inv, blind_output, mp,
+            mq, h;
         mpz_inits(
-            r, s, blind_input, temp, should_be_one, r_inv, blind_output, m1, m2,
+            r, s, blind_input, temp, should_be_one, r_inv, blind_output, mp, mq,
             h, NULL
         );
 
@@ -788,18 +788,18 @@ rsa_error_t rsa_mpz_private(rsa_ctx_t *ctx, mpz_t output, const mpz_t input) {
 
         {  // Garner's formula for the Chinese Remainder Theorem
             // Compute P component of the message => m ^ dp mod p
-            mpz_powm_sec(m1, temp, ctx->dp, ctx->p);
+            mpz_powm_sec(mp, temp, ctx->dp, ctx->p);
             // Compute q component of the message => m ^ dq mod q
-            mpz_powm_sec(m2, temp, ctx->dq, ctx->q);
+            mpz_powm_sec(mq, temp, ctx->dq, ctx->q);
 
             // Garner's formula:
-            //    h = (q_inv * (m1 - m2)) mod p
-            //    output = m2 + (h * q)
-            mpz_sub(h, m1, m2);
+            //    h = (q_inv * (mp - mq)) mod p
+            //    output = mq + (h * q)
+            mpz_sub(h, mp, mq);
             mpz_mul(h, ctx->q_inv, h);
             mpz_mod(h, h, ctx->p);
             mpz_mul(h, h, ctx->q);
-            mpz_add(blind_output, m2, h);
+            mpz_add(blind_output, mq, h);
         }
         
         // Unblind
@@ -808,7 +808,7 @@ rsa_error_t rsa_mpz_private(rsa_ctx_t *ctx, mpz_t output, const mpz_t input) {
         );  // output = (blind_output * r_inv) mod n
         mpz_mod(output, temp, ctx->n);
         mpz_clears(
-            r, s, blind_input, blind_output, temp, should_be_one, r_inv, m1, m2,
+            r, s, blind_input, blind_output, temp, should_be_one, r_inv, mp, mq,
             h, NULL
         );
     }
