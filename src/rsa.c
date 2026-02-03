@@ -42,9 +42,9 @@ For more information, please refer to <https://unlicense.org>
 #define MPZ_ENDIAN_CPU_NATIVE (0)
 
 #ifdef WIN32
-#define secure_zero(ptr,len)    SecureZeroMemory((ptr),(len))
-#else // Linux environments - TODO: make more general for other environments
-#define secure_zero(ptr, len)   explicit_bzero((ptr),(len))
+#define secure_zero(ptr, len) SecureZeroMemory((ptr), (len))
+#else  // Linux environments - TODO: make more general for other environments
+#define secure_zero(ptr, len) explicit_bzero((ptr), (len))
 #endif
 /****************************************************
     Static / private functions
@@ -71,24 +71,26 @@ static void secure_free(void *ptr, size_t size) {
 }
 
 static void *secure_realloc(void *ptr, size_t old_size, size_t new_size) {
-      if (NULL == ptr) {
-          return secure_malloc(new_size);  // realloc(NULL, n) == malloc(n)
-      }
-      if (0 == new_size) {
-          secure_free(ptr, old_size);
-          return NULL;
-      }
-      if (new_size == old_size) {
-          return ptr;
-      }
+    if (NULL == ptr) {
+        return secure_malloc(new_size);  // realloc(NULL, n) == malloc(n)
+    }
+    if (0 == new_size) {
+        secure_free(ptr, old_size);
+        return NULL;
+    }
+    if (new_size == old_size) {
+        return ptr;
+    }
 
-      void *new_ptr = secure_malloc(new_size); // Now, if secure_malloc() fails, it will just exit(1), but we do this for code hygiene
-      if (new_ptr) {
-          memcpy(new_ptr, ptr, (new_size < old_size) ? new_size : old_size);
-          secure_free(ptr, old_size);
-      }
-      return new_ptr;
-  }
+    void *new_ptr =
+        secure_malloc(new_size);  // Now, if secure_malloc() fails, it will just
+                                  // exit(1), but we do this for code hygiene
+    if (new_ptr) {
+        memcpy(new_ptr, ptr, (new_size < old_size) ? new_size : old_size);
+        secure_free(ptr, old_size);
+    }
+    return new_ptr;
+}
 
 /// Constant-time memcmp implementation
 static int ct_memcmp(const void *a, const void *b, size_t len) {
@@ -98,7 +100,7 @@ static int ct_memcmp(const void *a, const void *b, size_t len) {
     for (size_t i = 0; i < len; i++) {
         result |= x[i] ^ y[i];
     }
-     return result != 0;
+    return result != 0;
 }
 
 static rsa_error_t rsa_genprime(
@@ -121,8 +123,8 @@ static rsa_error_t rsa_genprime(
 // leaving the 200 most significant bits and compare the hamming distance. less
 // than 20 bits difference means the primes are too close to the square root of
 // the modulus, making factoring way easier.
-#define MOST_SIG_BITS_200    (200)
-#define MIN_HAMMING_DIST     (20)
+#define MOST_SIG_BITS_200 (200)
+#define MIN_HAMMING_DIST  (20)
 static rsa_error_t rsa_primes_too_close(mpz_t p, mpz_t q) {
     if (NULL == p || NULL == q) {
         return RSA_ERROR_INVALID_ARGUMENTS;  // Treat invalid input as "too
@@ -163,7 +165,10 @@ void rsa_init(rsa_ctx_t *ctx) {
         return;  // Avoid SEGFAULT
     }
     secure_zero(ctx, sizeof(rsa_ctx_t));  // Initialize context to zero
-    mpz_inits(ctx->p, ctx->q, ctx->d, ctx->n, ctx->e, NULL);
+    mpz_inits(
+        ctx->p, ctx->q, ctx->d, ctx->n, ctx->e, ctx->dp, ctx->dq, ctx->q_inv,
+        NULL
+    );
     ctx->is_private = RSA_KEY_NOT_SET;  // Initialize to invalid key state
 }
 
@@ -180,6 +185,9 @@ void rsa_clear(rsa_ctx_t *ctx) {
     mpz_set_ui(ctx->d, 0);
     mpz_set_ui(ctx->n, 0);
     mpz_set_ui(ctx->e, 0);
+    mpz_set_ui(ctx->dp, 0);
+    mpz_set_ui(ctx->dq, 0);
+    mpz_set_ui(ctx->q_inv, 0);
     ctx->is_private = RSA_KEY_NOT_SET;  // Initialize to invalid key state
 }
 
@@ -187,9 +195,12 @@ void rsa_free(rsa_ctx_t *ctx) {
     if (NULL == ctx) {
         return;  // Avoid SEGFAULT
     }
-    mpz_clears(ctx->p, ctx->q, ctx->d, ctx->n, ctx->e, NULL);
+    mpz_clears(
+        ctx->p, ctx->q, ctx->d, ctx->n, ctx->e, ctx->dp, ctx->dq, ctx->q_inv,
+        NULL
+    );
     secure_zero(ctx, sizeof(rsa_ctx_t));  // Initialize context to zero
-    ctx->is_private = RSA_KEY_NOT_SET;       // Initialize to invalid key state
+    ctx->is_private = RSA_KEY_NOT_SET;    // Initialize to invalid key state
 }
 
 rsa_error_t rsa_is_valid_base(rsa_base_t base) {
@@ -213,6 +224,10 @@ void rsa_debug(rsa_ctx_t *ctx) {
     gmp_printf("d: %Zx\n", ctx->d);
     gmp_printf("n: %Zx\n", ctx->n);
     gmp_printf("e: %Zx\n", ctx->e);
+    // Chinese Remainder Theorem pre-computed values
+    gmp_printf("dp: %Zx\n", ctx->dp);
+    gmp_printf("dq: %Zx\n", ctx->dq);
+    gmp_printf("q_inv: %Zx\n", ctx->q_inv);
     printf("key_size: %zu\n", ctx->key_size);
     printf("is_private: %d\n", ctx->is_private);
 }
@@ -608,6 +623,9 @@ rsa_error_t rsa_genkey(
 /// the public exponent e is coprime to lambda as part of the calculation. Call
 /// rsa_validate_key_components() to check the validity of the key components
 /// before calling this function (it does the primality checks).
+///
+/// As part of the more efficient Chinese Remainder Theorem implementation,
+/// compute DP, DQ, and Q_INV for later use versus the naive implementation
 rsa_error_t rsa_compute_private_exponent(rsa_ctx_t *ctx) {
     rsa_error_t ret = RSA_SUCCESS;
     if (NULL == ctx) {
@@ -624,11 +642,24 @@ rsa_error_t rsa_compute_private_exponent(rsa_ctx_t *ctx) {
     mpz_gcd(should_be_one, ctx->e, lambda);
     if (mpz_cmp_ui(should_be_one, 1) != 0) {
         ret = RSA_ERROR_NOT_COPRIME;  // Error: e is not coprime to lambda
+        goto exit;
     } else if (mpz_invert(ctx->d, ctx->e, lambda) == 0) {
         ret =
             RSA_ERROR_MODINV_NOT_EXIST;  // Error: modular inverse doesn't exist
+        goto exit;
     }
 
+    // Chinese Remainder Theorem pre-computed values
+    // Compute DP = d mod (p - 1)
+    mpz_mod(ctx->dp, ctx->d, p_minus_1);
+    // Compute DQ = d mod (q - 1)
+    mpz_mod(ctx->dq, ctx->d, q_minus_1);
+    // Compute modular inverse q_inv = q^(-1) mod (p)
+    if (mpz_invert(ctx->q_inv, ctx->q, ctx->p) == 0) {
+        ret = RSA_ERROR_MODINV_NOT_EXIST;
+    }
+
+exit:
     mpz_clears(p_minus_1, q_minus_1, lambda, should_be_one, NULL);
     return ret;  // Success
 }
@@ -698,8 +729,103 @@ rsa_error_t rsa_validate_key_components(rsa_ctx_t *ctx) {
 }
 
 /// This function performs the private part of RSA - message signing and
-/// decryption.
+/// decryption using the Chinese Remainder Theorem for efficiency
 rsa_error_t rsa_mpz_private(rsa_ctx_t *ctx, mpz_t output, const mpz_t input) {
+    if (NULL == ctx || NULL == output || NULL == input) {
+        return RSA_ERROR_INVALID_ARGUMENTS;  // Error: Invalid context
+    }
+    if (RSA_PRIVATE != ctx->is_private) {
+        return RSA_ERROR_INVALID_CONTEXT;  // Error: Context is not private key
+    }
+    if (mpz_sizeinbase(input, 2) > ctx->key_size ||
+        mpz_cmp(input, ctx->n) >= 0) {
+        return RSA_ERROR_INVALID_INPUT_SIZE;  // Error: Input is greater than
+                                              // modulus
+    }
+
+#if defined(RSA_NO_BLINDING)
+    mpz_t m1, m2, h;
+    mpz_inits(m1, m2, h, NULL);
+
+    // Compute P component of the message => m ^ dp mod p
+    mpz_powm_sec(m1, input, ctx->dp, ctx->p);
+    // Compute q component of the message => m ^ dq mod q
+    mpz_powm_sec(m2, input, ctx->dq, ctx->q);
+
+    // Garner's formula:
+    //    h = (q_inv * (m1 - m2)) mod p
+    //    output = m2 + (h * q)
+    mpz_sub(h, m1, m2);
+    mpz_mul(h, ctx->q_inv, h);
+    mpz_mod(h, h, ctx->p);
+    mpz_mul(h, h, ctx->q);
+    mpz_add(output, m2, h);
+    mpz_clears(m1, m2, h, NULL);
+#else
+    {  // scope to clear the stack
+        mpz_t r, s, blind_input, temp, should_be_one, r_inv, blind_output, m1,
+            m2, h;
+        mpz_inits(
+            r, s, blind_input, temp, should_be_one, r_inv, blind_output, m1, m2,
+            h, NULL
+        );
+
+        int mod_inv_exists = 0;
+        do {
+            rsa_mpz_gen_random_secure(
+                r, ctx->key_size
+            );  // random r less than and coprime to the modulus
+            mpz_gcd(should_be_one, ctx->n, r);
+            mod_inv_exists = mpz_invert(
+                r_inv, r, ctx->n
+            );  // r_inv = modular inverse of r mod n, save for later
+        } while (mpz_cmp(r, ctx->n) > 0 || mpz_cmp_ui(should_be_one, 1) != 0 ||
+                 mod_inv_exists == 0);
+
+        mpz_powm_sec(s, r, ctx->e, ctx->n);  // s = r ^ e mod n
+        mpz_mul(blind_input, input, s);      // blind_input = (s * input) mod n
+        mpz_mod(temp, blind_input, ctx->n);
+
+        {  // Garner's formula for the Chinese Remainder Theorem
+            // Compute P component of the message => m ^ dp mod p
+            mpz_powm_sec(m1, temp, ctx->dp, ctx->p);
+            // Compute q component of the message => m ^ dq mod q
+            mpz_powm_sec(m2, temp, ctx->dq, ctx->q);
+
+            // Garner's formula:
+            //    h = (q_inv * (m1 - m2)) mod p
+            //    output = m2 + (h * q)
+            mpz_sub(h, m1, m2);
+            mpz_mul(h, ctx->q_inv, h);
+            mpz_mod(h, h, ctx->p);
+            mpz_mul(h, h, ctx->q);
+            mpz_add(blind_output, m2, h);
+        }
+        
+        // Unblind
+        mpz_mul(
+            temp, blind_output, r_inv
+        );  // output = (blind_output * r_inv) mod n
+        mpz_mod(output, temp, ctx->n);
+        mpz_clears(
+            r, s, blind_input, blind_output, temp, should_be_one, r_inv, m1, m2,
+            h, NULL
+        );
+    }
+#endif  // RSA_NO_BLINDING
+    if (mpz_sizeinbase(output, 2) > ctx->key_size) {
+        return RSA_ERROR_INVALID_OUTPUT_SIZE;  // Error: Invalid output size -
+                                               // should be less than modulus
+    }
+
+    return RSA_SUCCESS;
+}
+
+/// This function performs the private part of RSA - message signing and
+/// decryption using the naive operation
+static rsa_error_t rsa_mpz_private_naive(
+    rsa_ctx_t *ctx, mpz_t output, const mpz_t input
+) {
     if (NULL == ctx || NULL == output || NULL == input) {
         return RSA_ERROR_INVALID_ARGUMENTS;  // Error: Invalid context
     }
@@ -1122,7 +1248,8 @@ rsa_error_t rsa_pss_verify(
 
     mbedtls_sha256(m_prime, sizeof(m_prime), H_prime, 0);
 
-    // Step 11: Check H == H' - perform in constant time to prevent timing attacks
+    // Step 11: Check H == H' - perform in constant time to prevent timing
+    // attacks
     if (ct_memcmp(H, H_prime, h_len) != 0) {
         ret = RSA_ERROR_INVALID_SIGNATURE;
         goto exit;
