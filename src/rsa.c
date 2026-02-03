@@ -631,19 +631,14 @@ rsa_error_t rsa_compute_private_exponent(rsa_ctx_t *ctx) {
     if (NULL == ctx) {
         return RSA_ERROR_INVALID_ARGUMENTS;  // Error: Invalid context
     }
-    mpz_t p_minus_1, q_minus_1, lambda, should_be_one;
-    mpz_inits(p_minus_1, q_minus_1, lambda, should_be_one, NULL);
+    mpz_t p_minus_1, q_minus_1, lambda;
+    mpz_inits(p_minus_1, q_minus_1, lambda, NULL);
 
     mpz_sub_ui(p_minus_1, ctx->p, 1);
     mpz_sub_ui(q_minus_1, ctx->q, 1);
     mpz_lcm(lambda, p_minus_1, q_minus_1);
-    // Check if e is coprime to lambda. If it is, then compute modular inverse,
-    // check if it exists and set as the private exponent d
-    mpz_gcd(should_be_one, ctx->e, lambda);
-    if (mpz_cmp_ui(should_be_one, 1) != 0) {
-        ret = RSA_ERROR_NOT_COPRIME;  // Error: e is not coprime to lambda
-        goto exit;
-    } else if (mpz_invert(ctx->d, ctx->e, lambda) == 0) {
+    // Compute modular inverse - if e and lambda are not coprime, this will fail
+    if (mpz_invert(ctx->d, ctx->e, lambda) == 0) {
         ret =
             RSA_ERROR_MODINV_NOT_EXIST;  // Error: modular inverse doesn't exist
         goto exit;
@@ -660,7 +655,7 @@ rsa_error_t rsa_compute_private_exponent(rsa_ctx_t *ctx) {
     }
 
 exit:
-    mpz_clears(p_minus_1, q_minus_1, lambda, should_be_one, NULL);
+    mpz_clears(p_minus_1, q_minus_1, lambda, NULL);
     return ret;  // Success
 }
 
@@ -756,37 +751,35 @@ rsa_error_t rsa_mpz_private(rsa_ctx_t *ctx, mpz_t output, const mpz_t input) {
     //    h = (q_inv * (mp - mq)) mod p
     //    output = mq + (h * q)
     mpz_sub(h, mp, mq);
-    mpz_mul(h, ctx->q_inv, h);
+    mpz_mul(h, h, ctx->q_inv);
     mpz_mod(h, h, ctx->p);
     mpz_mul(h, h, ctx->q);
     mpz_add(output, mq, h);
     mpz_clears(mp, mq, h, NULL);
 #else
     {  // scope to clear the stack
-        mpz_t r, s, blind_input, temp, should_be_one, r_inv, blind_output, mp,
-            mq, h;
+        mpz_t r, s, blind_input, temp, r_inv, blind_output;
         mpz_inits(
-            r, s, blind_input, temp, should_be_one, r_inv, blind_output, mp, mq,
-            h, NULL
+            r, s, blind_input, temp, r_inv, blind_output, NULL
         );
 
-        int mod_inv_exists = 0;
+        // Generate random r less than and coprime to the modulus
         do {
             rsa_mpz_gen_random_secure(
                 r, ctx->key_size
-            );  // random r less than and coprime to the modulus
-            mpz_gcd(should_be_one, ctx->n, r);
-            mod_inv_exists = mpz_invert(
-                r_inv, r, ctx->n
-            );  // r_inv = modular inverse of r mod n, save for later
-        } while (mpz_cmp(r, ctx->n) > 0 || mpz_cmp_ui(should_be_one, 1) != 0 ||
-                 mod_inv_exists == 0);
+            );  
+            // if n and r are not coprime, then mpz_invert will fail - no need to check gcd.
+            // Save the modular inverse in r_inv
+        } while (mpz_cmp(r, ctx->n) > 0 || 0 == mpz_invert(r_inv, r, ctx->n));
 
+        // Blind input
         mpz_powm_sec(s, r, ctx->e, ctx->n);  // s = r ^ e mod n
         mpz_mul(blind_input, input, s);      // blind_input = (s * input) mod n
         mpz_mod(temp, blind_input, ctx->n);
 
-        {  // Garner's formula for the Chinese Remainder Theorem
+        {  // Garner's formula for the Chinese Remainder Theorem - more efficient RSA private operation
+            mpz_t mp, mq, h;
+            mpz_inits(mp, mq, h, NULL);
             // Compute P component of the message => m ^ dp mod p
             mpz_powm_sec(mp, temp, ctx->dp, ctx->p);
             // Compute q component of the message => m ^ dq mod q
@@ -796,10 +789,11 @@ rsa_error_t rsa_mpz_private(rsa_ctx_t *ctx, mpz_t output, const mpz_t input) {
             //    h = (q_inv * (mp - mq)) mod p
             //    output = mq + (h * q)
             mpz_sub(h, mp, mq);
-            mpz_mul(h, ctx->q_inv, h);
+            mpz_mul(h, h, ctx->q_inv);
             mpz_mod(h, h, ctx->p);
             mpz_mul(h, h, ctx->q);
             mpz_add(blind_output, mq, h);
+            mpz_clears(mp, mq, h, NULL);
         }
         
         // Unblind
@@ -808,8 +802,7 @@ rsa_error_t rsa_mpz_private(rsa_ctx_t *ctx, mpz_t output, const mpz_t input) {
         );  // output = (blind_output * r_inv) mod n
         mpz_mod(output, temp, ctx->n);
         mpz_clears(
-            r, s, blind_input, blind_output, temp, should_be_one, r_inv, mp, mq,
-            h, NULL
+            r, s, blind_input, blind_output, temp, r_inv, NULL
         );
     }
 #endif  // RSA_NO_BLINDING
@@ -844,35 +837,37 @@ static rsa_error_t rsa_mpz_private_naive(
     );  // output = (input ^ private_exp) mod n
 #else
     {  // scope to clear the stack
-        mpz_t r, s, blind_input, temp, should_be_one, r_inv, blind_output;
+        mpz_t r, s, blind_input, temp, r_inv, blind_output;
         mpz_inits(
-            r, s, blind_input, temp, should_be_one, r_inv, blind_output, NULL
+            r, s, blind_input, temp, r_inv, blind_output, NULL
         );
 
-        int mod_inv_exists = 0;
+        // Generate random r less than and coprime to the modulus
         do {
             rsa_mpz_gen_random_secure(
                 r, ctx->key_size
-            );  // random r less than and coprime to the modulus
-            mpz_gcd(should_be_one, ctx->n, r);
-            mod_inv_exists = mpz_invert(
-                r_inv, r, ctx->n
-            );  // r_inv = modular inverse of r mod n, save for later
-        } while (mpz_cmp(r, ctx->n) > 0 || mpz_cmp_ui(should_be_one, 1) != 0 ||
-                 mod_inv_exists == 0);
+            );  
+            // if n and r are not coprime, then mpz_invert will fail - no need to check gcd.
+            // Save the modular inverse in r_inv
+        } while (mpz_cmp(r, ctx->n) > 0 || 0 == mpz_invert(r_inv, r, ctx->n));
 
+        // Blind input
         mpz_powm_sec(s, r, ctx->e, ctx->n);  // s = r ^ e mod n
         mpz_mul(blind_input, input, s);      // blind_input = (s * input) mod n
         mpz_mod(temp, blind_input, ctx->n);
+
+        // Compute RSA private operation
         mpz_powm_sec(
             blind_output, temp, ctx->d, ctx->n
         );  // blind_output = (blind_input ^ private_exp) mod n
+
+        // Unblind
         mpz_mul(
             temp, blind_output, r_inv
         );  // output = (blind_output * r_inv) mod n
         mpz_mod(output, temp, ctx->n);
         mpz_clears(
-            r, s, blind_input, blind_output, temp, should_be_one, r_inv, NULL
+            r, s, blind_input, blind_output, temp, r_inv, NULL
         );
     }
 #endif  // RSA_NO_BLINDING
