@@ -24,7 +24,9 @@ OTHER DEALINGS IN THE SOFTWARE.
 
 For more information, please refer to <https://unlicense.org>
 */
-#include "rsa.h"
+#ifdef WIN32
+#include <Windows.h>
+#endif
 
 #include <gmp.h>
 #include <stdbool.h>
@@ -33,6 +35,7 @@ For more information, please refer to <https://unlicense.org>
 #include <sys/time.h>
 #include <time.h>
 
+#include "rsa.h"
 #include "test/test_common.h"
 
 #define MILLER_RABIN_ITERATIONS 50
@@ -40,6 +43,10 @@ For more information, please refer to <https://unlicense.org>
 #define MPZ_ENDIAN_MSB_FIRST  (1)
 #define MPZ_ENDIAN_LSB_FIRST  (-1)
 #define MPZ_ENDIAN_CPU_NATIVE (0)
+
+#define MPZ_CONFIRMED_PRIME       (2)
+#define MPZ_STRONG_PSEUDOPRIME    (1)
+#define MPZ_CONFIRMED_COMPOSITE   (0)
 
 #ifdef WIN32
 #define secure_zero(ptr, len) SecureZeroMemory((ptr), (len))
@@ -103,19 +110,61 @@ static int ct_memcmp(const void *a, const void *b, size_t len) {
     return result != 0;
 }
 
+static rsa_error_t rsa_valid_prime(mpz_t prime, mpz_t exponent) {
+    mpz_t prime_less_one, coprime;
+#if defined(RSA_MORE_CHECKS)
+    // I believe that mpz_probab_prime already performs these checks
+    if (mpz_cmp_ui(prime, 1) <= 0) {
+        return RSA_ERROR_INVALID_PRIME_TOO_SMALL;  // Error: prime P is less
+                                                    // than or equal to 1
+    }
+#endif  // RSA_MORE_CHECKS
+    // First easy check - is this value actually (probably) prime?
+    // If the check returns MPZ_CONFIRMED_COMPOSITE, reject
+    if (mpz_probab_prime_p(prime, MILLER_RABIN_ITERATIONS) ==
+            MPZ_CONFIRMED_COMPOSITE) {
+        return RSA_ERROR_PRIMAILTY_CHECK;  // Error: primality check failed
+    }
+    // This logic is duplicated in rsa_genprime
+    // RSA genprime has its own implementation to avoid heap churn - if we were
+    // to call this in every genprime loop, we'd allocate and deallocate potentially
+    // hundreds or thousands of times
+    //
+    // Security issue - is the private prime minus one coprime to the exponent?
+    // If not, RSA would still "work" but would be terribly insecure. Validate
+    // that gcd(p-1, e) = 1
+    mpz_inits(prime_less_one, coprime, NULL);
+    mpz_sub_ui(prime_less_one, prime, 1U);
+    mpz_gcd(coprime, prime_less_one, exponent);
+    bool ret = (mpz_cmp_ui(coprime, 1) == 0);
+    mpz_clears(prime_less_one, coprime, NULL);
+    return ret ? RSA_SUCCESS : RSA_ERROR_NOT_COPRIME;
+}
+
 static rsa_error_t rsa_genprime(
-    mpz_t prime, mp_bitcnt_t num_bits, bool is_secure
+    mpz_t prime, mp_bitcnt_t num_bits, mpz_t opt_exponent
 ) {
     if (NULL == prime || num_bits < 2 || num_bits > RSA_KEYSIZE_MAX) {
         return RSA_ERROR_INVALID_ARGUMENTS;
     }
-    // Generate a random prime number with the specified number of bits
-    do {
-        if (is_secure)
-            rsa_mpz_gen_random_secure(prime, num_bits);
-        else
-            rsa_mpz_gen_random_fast(prime, num_bits);
-    } while (mpz_probab_prime_p(prime, MILLER_RABIN_ITERATIONS) == 0);
+
+    if (NULL != opt_exponent) {
+        mpz_t prime_less_one, coprime;
+        mpz_inits(prime_less_one, coprime, NULL);
+        do
+        {
+            // Generate a random prime number `P` with the specified number of bits
+            // where `P - 1` is coprime to the exponent
+            rsa_mpz_gen_random_prime_secure(prime, num_bits);
+            mpz_sub_ui(prime_less_one, prime, 1U);
+            mpz_gcd(coprime, prime_less_one, opt_exponent);
+        } while (mpz_cmp_ui(coprime, 1) != 0);
+        mpz_clears(prime_less_one, coprime, NULL);
+    }
+    else {
+        // Generate a random prime number with the specified number of bits
+        rsa_mpz_gen_random_prime_secure(prime, num_bits);
+    }
     return RSA_SUCCESS;  // Success: prime generated
 }
 
@@ -439,6 +488,8 @@ const char *rsa_strerror(int err_code) {
             return "Invalid modulus";
         case RSA_ERROR_INVALID_EXPONENT:
             return "Invalid exponent";
+        case RSA_ERROR_EXPONENT_TOO_LARGE:
+            return "Public exponent too large";
 
         // Message/signature related errors
         case RSA_ERROR_INVALID_MESSAGE:
@@ -475,13 +526,19 @@ const char *rsa_strerror(int err_code) {
         case RSA_ERROR_ALLOC_FAILED:
             return "Memory allocation failed";
 
+        case RSA_ERROR_FAULT_DETECTED:
+            return "Power fault detected in private operation";
+
+        case RSA_ERROR_PRIMAILTY_CHECK:
+            return "Miller-Rabin primality check failed";
+
         default:
             return "Unknown error code";
     }
 }
 
 // Deprecated - not secure. Just a function for practicing RNG.
-rsa_error_t rsa_mpz_gen_random_fast(mpz_t result, mp_bitcnt_t num_bits) {
+rsa_error_t rsa_mpz_gen_random_prime_fast(mpz_t result, mp_bitcnt_t num_bits) {
     if (NULL == result) {
         return RSA_ERROR_INVALID_ARGUMENTS;
     }
@@ -499,9 +556,17 @@ rsa_error_t rsa_mpz_gen_random_fast(mpz_t result, mp_bitcnt_t num_bits) {
         clock_gettime(CLOCK_MONOTONIC, &now);
         accumulator |= (now.tv_nsec & 0x000000ff) << (i * 8);
     }
+    mpz_t rand_int;
+    mpz_init(rand_int);
+
     gmp_randseed_ui(state, accumulator);
-    mpz_urandomb(result, state, num_bits);
+    mpz_urandomb(rand_int, state, num_bits);
     gmp_randclear(state);
+
+    // Iterates on rand_int, performing Miller-Rabin primality checks until
+    // MPZ_STRONG_PSEUDOPRIME is returned
+    mpz_nextprime(result, rand_int);
+    mpz_clear(rand_int);
     return RSA_SUCCESS;
 }
 
@@ -536,7 +601,7 @@ exit:
 }
 
 // More secure by reading from /dev/urandom
-rsa_error_t rsa_mpz_gen_random_secure(mpz_t result, mp_bitcnt_t num_bits) {
+static rsa_error_t rsa_mpz_gen_random_secure(mpz_t result, mp_bitcnt_t num_bits) {
     if (NULL == result) {
         return RSA_ERROR_INVALID_ARGUMENTS;
     }
@@ -553,6 +618,37 @@ rsa_error_t rsa_mpz_gen_random_secure(mpz_t result, mp_bitcnt_t num_bits) {
             result, num_bytes, MPZ_ENDIAN_MSB_FIRST, sizeof(unsigned char),
             MPZ_ENDIAN_MSB_FIRST, 0, buffer
         );
+        free(buffer);
+        return RSA_SUCCESS;
+    }
+    // error case here
+    return RSA_ERROR_ALLOC_FAILED;
+}
+
+// Generate random prime number - more secure by reading from /dev/urandom
+rsa_error_t rsa_mpz_gen_random_prime_secure(mpz_t prime, mp_bitcnt_t num_bits) {
+    if (NULL == prime) {
+        return RSA_ERROR_INVALID_ARGUMENTS;
+    }
+    if (num_bits < 2 || (num_bits % 8) != 0) {
+        return RSA_ERROR_INVALID_LENGTH;
+    }
+    size_t num_bytes = num_bits / 8;
+
+    // read num_bits from /dev/urandom
+    unsigned char *buffer = rand_bytes_urandom(num_bytes);
+    if (NULL != buffer) {
+        mpz_t rand_int;
+        mpz_init(rand_int);
+        // Convert the buffer to a GMP number
+        mpz_import(
+            rand_int, num_bytes, MPZ_ENDIAN_MSB_FIRST, sizeof(unsigned char),
+            MPZ_ENDIAN_MSB_FIRST, 0, buffer
+        );
+        // iterates on the random number and then runs the Miller-Rabin
+        // primality checks until at least MPZ_STRONG_PSEUDOPRIME returns
+        mpz_nextprime(prime, rand_int);
+        mpz_clear(rand_int);
         free(buffer);
         return RSA_SUCCESS;
     }
@@ -578,21 +674,34 @@ rsa_error_t rsa_genkey(
     if (0 == pub_exponent) {
         pub_exponent = RSA_DEFAULT_PUBLIC_EXPONENT;  // Default to 65537
     }
-    if (pub_exponent <= 1 || (pub_exponent % 2) == 0) {
+
+    // for the exponent, only accept if it is provably prime
+    // Rationale - values too big to be proved prime under the Miller-Rabin
+    // test are too big to be efficient in the RSA algorithm. Reject out of hand
+    mpz_set_ui(ctx->e, pub_exponent);
+    switch(mpz_probab_prime_p(ctx->e, MILLER_RABIN_ITERATIONS))
+    {
+    case MPZ_CONFIRMED_PRIME:
+        // Accept exponent
+        break;
+    case MPZ_STRONG_PSEUDOPRIME:
+        return RSA_ERROR_EXPONENT_TOO_LARGE;
+    case MPZ_CONFIRMED_COMPOSITE:
         return RSA_ERROR_INVALID_EXPONENT;
+    default:
+        return RSA_ERROR_INVALID_ARGUMENTS;
     }
 
-    mpz_set_ui(ctx->e, pub_exponent);
-
     // Generate two primes that have a bitlen of half the key size
+    // and are coprime to the exponent `e`
     rsa_error_t ret = RSA_SUCCESS;
     do {
         do {
-            ret = rsa_genprime(ctx->p, (bitlen / 2), true);
+            ret = rsa_genprime(ctx->p, (bitlen / 2), ctx->e);
             if (RSA_SUCCESS != ret) {
                 return ret;  // Error: Failed to generate prime P
             }
-            ret = rsa_genprime(ctx->q, (bitlen / 2), true);
+            ret = rsa_genprime(ctx->q, (bitlen / 2), ctx->e);
             if (RSA_SUCCESS != ret) {
                 return ret;  // Error: Failed to generate prime Q
             }
@@ -659,14 +768,10 @@ exit:
     return ret;  // Success
 }
 
-// This function validates the key components of the RSA algorithm for length,
+// mpz_probab_prime_p validates the key components of the RSA algorithm for length,
 // primality, and coprimality. Perform basic primality tests (is zero, is one,
 // is even, is mod 3), then the Baillie-PSW primality test for the first 24
 // reps, and then finally Miller-Rabin for the remaining reps (50 here).
-// -- If the mpz_probab_prime_p function returns 0, then the number is not
-// prime.
-//    If it returns 1, then it is a strong pseudoprime and passes this test. If
-//    it is proven to be prime, then the function returns 2.
 rsa_error_t rsa_validate_key_components(rsa_ctx_t *ctx) {
     if (NULL == ctx) {
         return RSA_ERROR_INVALID_ARGUMENTS;  // Error: Invalid context
@@ -678,17 +783,27 @@ rsa_error_t rsa_validate_key_components(rsa_ctx_t *ctx) {
         return RSA_ERROR_INVALID_CONTEXT;  // Error: Context is not initialized
     }
 
-    // On the odd chance that the public exponent is not 0x10001 17, or 3 (the
-    // three most common public exponents), check that it is prime
+    // On the odd chance that the public exponent is not 0x10001 (65537), 17, or 3 (the
+    // three most common public exponents), check that it is provably prime
     if (mpz_cmp_ui(ctx->e, RSA_DEFAULT_PUBLIC_EXPONENT) != 0 &&
         mpz_cmp_ui(ctx->e, 17) != 0 && mpz_cmp_ui(ctx->e, 3) != 0) {
         if (mpz_cmp_ui(ctx->e, 0) <= 0) {
             return RSA_ERROR_INVALID_EXPONENT;  // Error: public exponent is not
                                                 // positive
         }
-        if (mpz_probab_prime_p(ctx->e, MILLER_RABIN_ITERATIONS) == 0) {
-            return RSA_ERROR_INVALID_EXPONENT;  // Error: public exponent is not
-                                                // prime.
+        // Rationale - public exponents should be small enough to be provably prime,
+        // or else they are too big to be efficient in the RSA algorithm
+        switch(mpz_probab_prime_p(ctx->e, MILLER_RABIN_ITERATIONS))
+        {
+        case MPZ_CONFIRMED_PRIME:
+            // Accept exponent
+            break;
+        case MPZ_STRONG_PSEUDOPRIME:
+            return RSA_ERROR_EXPONENT_TOO_LARGE;
+        case MPZ_CONFIRMED_COMPOSITE:
+            return RSA_ERROR_INVALID_EXPONENT;
+        default:
+            return RSA_ERROR_INVALID_ARGUMENTS;
         }
     }
 
@@ -702,22 +817,15 @@ rsa_error_t rsa_validate_key_components(rsa_ctx_t *ctx) {
     }
 
     if (ctx->is_private == RSA_PRIVATE) {
-#if defined(RSA_MORE_CHECKS)
-        // I believe that mpz_probab_prime already performs these checks
-        if (mpz_cmp_ui(ctx->p, 1) <= 0) {
-            return RSA_ERROR_INVALID_PRIME_TOO_SMALL;  // Error: prime P is less
-                                                       // than or equal to 1
+        // Two checks per prime: 
+        // 1) Is the prime at least a strong pseudoprime?
+        // 2) Is the prime (less one) co-prime to the public exponent? -> gcd(prime - 1, public_exponent) == 1
+        rsa_error_t ret = RSA_SUCCESS;
+        if(RSA_SUCCESS != (ret = rsa_valid_prime(ctx->p, ctx->e))) {
+            return ret;
         }
-        if (mpz_cmp_ui(ctx->q, 1) <= 0) {
-            return RSA_ERROR_INVALID_PRIME_TOO_SMALL;  // Error: prime Q is less
-                                                       // than or equal to 1
-        }
-#endif  // RSA_MORE_CHECKS
-        if (mpz_probab_prime_p(ctx->p, MILLER_RABIN_ITERATIONS) == 0) {
-            return RSA_ERROR_P_NOT_PRIME;  // Error: prime P is not prime
-        }
-        if (mpz_probab_prime_p(ctx->q, MILLER_RABIN_ITERATIONS) == 0) {
-            return RSA_ERROR_Q_NOT_PRIME;  // Error: prime Q is not prime
+        if(RSA_SUCCESS != (ret = rsa_valid_prime(ctx->q, ctx->e))) {
+            return ret;
         }
     }
     return RSA_SUCCESS;  // Success
@@ -758,32 +866,31 @@ rsa_error_t rsa_mpz_private(rsa_ctx_t *ctx, mpz_t output, const mpz_t input) {
     mpz_clears(mp, mq, h, NULL);
 #else
     {  // scope to clear the stack
-        mpz_t r, s, blind_input, temp, r_inv, blind_output;
-        mpz_inits(
-            r, s, blind_input, temp, r_inv, blind_output, NULL
-        );
+        mpz_t r, s, blind_input, r_inv, blind_output;
+        mpz_inits(r, s, blind_input, r_inv, blind_output, NULL);
 
         // Generate random r less than and coprime to the modulus
+        // Then compute the modular inverse `r^-1 mod n` (needed for unblinding)
+        // `r` does not have to be prime itself
         do {
-            rsa_mpz_gen_random_secure(
-                r, ctx->key_size
-            );  
-            // if n and r are not coprime, then mpz_invert will fail - no need to check gcd.
-            // Save the modular inverse in r_inv
+            rsa_mpz_gen_random_secure(r, ctx->key_size);
+            // if n and r are not coprime, then mpz_invert will fail - no need
+            // to check gcd. Save the modular inverse in r_inv
         } while (mpz_cmp(r, ctx->n) > 0 || 0 == mpz_invert(r_inv, r, ctx->n));
 
         // Blind input
         mpz_powm_sec(s, r, ctx->e, ctx->n);  // s = r ^ e mod n
         mpz_mul(blind_input, input, s);      // blind_input = (s * input) mod n
-        mpz_mod(temp, blind_input, ctx->n);
+        mpz_mod(blind_input, blind_input, ctx->n);
 
-        {  // Garner's formula for the Chinese Remainder Theorem - more efficient RSA private operation
+        {  // Garner's formula for the Chinese Remainder Theorem - more
+           // efficient RSA private operation
             mpz_t mp, mq, h;
             mpz_inits(mp, mq, h, NULL);
             // Compute P component of the message => m ^ dp mod p
-            mpz_powm_sec(mp, temp, ctx->dp, ctx->p);
+            mpz_powm_sec(mp, blind_input, ctx->dp, ctx->p);
             // Compute q component of the message => m ^ dq mod q
-            mpz_powm_sec(mq, temp, ctx->dq, ctx->q);
+            mpz_powm_sec(mq, blind_input, ctx->dq, ctx->q);
 
             // Garner's formula:
             //    h = (q_inv * (mp - mq)) mod p
@@ -795,15 +902,27 @@ rsa_error_t rsa_mpz_private(rsa_ctx_t *ctx, mpz_t output, const mpz_t input) {
             mpz_add(blind_output, mq, h);
             mpz_clears(mp, mq, h, NULL);
         }
-        
+
         // Unblind
         mpz_mul(
-            temp, blind_output, r_inv
+            blind_output, blind_output, r_inv
         );  // output = (blind_output * r_inv) mod n
-        mpz_mod(output, temp, ctx->n);
-        mpz_clears(
-            r, s, blind_input, blind_output, temp, r_inv, NULL
-        );
+        mpz_mod(output, blind_output, ctx->n);
+        mpz_clears(r, s, blind_input, blind_output, r_inv, NULL);
+
+        // Fault detection: verify result
+        {
+            mpz_t verify;
+            int is_valid = 0;
+            mpz_init(verify);
+            mpz_powm_sec(verify, output, ctx->e, ctx->n);
+            is_valid = mpz_cmp(verify, input);
+            mpz_clear(verify);
+            if (0 != is_valid) {
+                mpz_set_ui(output, 0);            // Don't leak faulty value
+                return RSA_ERROR_FAULT_DETECTED;  // New error code
+            }
+        }
     }
 #endif  // RSA_NO_BLINDING
     if (mpz_sizeinbase(output, 2) > ctx->key_size) {
@@ -816,6 +935,7 @@ rsa_error_t rsa_mpz_private(rsa_ctx_t *ctx, mpz_t output, const mpz_t input) {
 
 /// This function performs the private part of RSA - message signing and
 /// decryption using the naive operation
+/*
 static rsa_error_t rsa_mpz_private_naive(
     rsa_ctx_t *ctx, mpz_t output, const mpz_t input
 ) {
@@ -837,38 +957,46 @@ static rsa_error_t rsa_mpz_private_naive(
     );  // output = (input ^ private_exp) mod n
 #else
     {  // scope to clear the stack
-        mpz_t r, s, blind_input, temp, r_inv, blind_output;
-        mpz_inits(
-            r, s, blind_input, temp, r_inv, blind_output, NULL
-        );
+        mpz_t r, s, blind_input, r_inv, blind_output;
+        mpz_inits(r, s, blind_input, r_inv, blind_output, NULL);
 
         // Generate random r less than and coprime to the modulus
         do {
-            rsa_mpz_gen_random_secure(
-                r, ctx->key_size
-            );  
-            // if n and r are not coprime, then mpz_invert will fail - no need to check gcd.
-            // Save the modular inverse in r_inv
+            rsa_mpz_gen_random_secure(r, ctx->key_size);
+            // if n and r are not coprime, then mpz_invert will fail - no need
+            // to check gcd. Save the modular inverse in r_inv
         } while (mpz_cmp(r, ctx->n) > 0 || 0 == mpz_invert(r_inv, r, ctx->n));
 
         // Blind input
         mpz_powm_sec(s, r, ctx->e, ctx->n);  // s = r ^ e mod n
         mpz_mul(blind_input, input, s);      // blind_input = (s * input) mod n
-        mpz_mod(temp, blind_input, ctx->n);
+        mpz_mod(blind_input, blind_input, ctx->n);
 
         // Compute RSA private operation
         mpz_powm_sec(
-            blind_output, temp, ctx->d, ctx->n
+            blind_output, blind_input, ctx->d, ctx->n
         );  // blind_output = (blind_input ^ private_exp) mod n
 
         // Unblind
         mpz_mul(
-            temp, blind_output, r_inv
+            blind_output, blind_output, r_inv
         );  // output = (blind_output * r_inv) mod n
-        mpz_mod(output, temp, ctx->n);
-        mpz_clears(
-            r, s, blind_input, blind_output, temp, r_inv, NULL
-        );
+        mpz_mod(output, blind_output, ctx->n);
+        mpz_clears(r, s, blind_input, blind_output, r_inv, NULL);
+
+        // Fault detection: verify result
+        {
+            mpz_t verify;
+            int is_valid = 0;
+            mpz_init(verify);
+            mpz_powm_sec(verify, output, ctx->e, ctx->n);
+            is_valid = mpz_cmp(verify, input);
+            mpz_clear(verify);
+            if (0 != is_valid) {
+                mpz_set_ui(output, 0);            // Don't leak faulty value
+                return RSA_ERROR_FAULT_DETECTED;  // New error code
+            }
+        }
     }
 #endif  // RSA_NO_BLINDING
     if (mpz_sizeinbase(output, 2) > ctx->key_size) {
@@ -878,6 +1006,7 @@ static rsa_error_t rsa_mpz_private_naive(
 
     return RSA_SUCCESS;
 }
+*/
 
 rsa_error_t rsa_private(
     rsa_ctx_t *ctx, char *output, size_t olen, const char *input, size_t ilen,
@@ -1008,7 +1137,7 @@ exit:
 #include "mbedtls/sha256.h"
 #define SHA256_DIGEST_SIZE (32)
 
-// RSA-PSS code - Validating Claude output in progress
+// RSA-PSS code
 // MGF1 based on SHA-256 as specified in PKCS#1 v2.2
 // Expands a hash output into a mask of desired length using counter-based
 // iteration
@@ -1085,6 +1214,7 @@ rsa_error_t rsa_pss_sign(
 
     // Step 3: Create M' = (0x)00 00 00 00 00 00 00 00 || mHash || salt
     memset(m_prime, 0x00, 8);
+    // m_prime[7] = 0x01; // Evil bit flip to make our version differ from the real one
     memcpy(m_prime + 8, m_hash, h_len);
     memcpy(m_prime + 8 + h_len, salt, s_len);
 
@@ -1185,6 +1315,7 @@ rsa_error_t rsa_pss_verify(
     mpz_export(
         EM, &count, MPZ_ENDIAN_MSB_FIRST, 1, MPZ_ENDIAN_MSB_FIRST, 0, em_int
     );
+
     if (count < em_len) {
         memmove(EM + (em_len - count), EM, count);
         memset(EM, 0, em_len - count);
@@ -1238,6 +1369,7 @@ rsa_error_t rsa_pss_verify(
 
     // Step 10: Compute H' = Hash(0x00 00 00 00 00 00 00 00 || mHash || salt)
     memset(m_prime, 0, 8);
+    // m_prime[7] = 0x01; // Evil bit flip to make our version differ from the real one
     memcpy(m_prime + 8, m_hash, h_len);
     memcpy(m_prime + 8 + h_len, salt, s_len);
 
