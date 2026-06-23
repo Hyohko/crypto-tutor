@@ -141,6 +141,9 @@ typedef enum {
     RSA_ERROR_PRIMES_TOO_CLOSE = -21, /**< Prime factors P and Q are too close,
                                          potentially weakening the key. */
     RSA_ERROR_ALLOC_FAILED = -22,     /**< Memory allocation failed. */
+    RSA_ERROR_FAULT_DETECTED = -23,     /**< Power fault detected in private key operation. */
+    RSA_ERROR_PRIMAILTY_CHECK = -24,
+    RSA_ERROR_EXPONENT_TOO_LARGE = -25,
 } rsa_error_t;
 
 /**
@@ -388,15 +391,15 @@ rsa_error_t rsa_compute_private_exponent(rsa_ctx_t *ctx);
 rsa_error_t rsa_mpz_gen_random_fast(mpz_t result, mp_bitcnt_t num_bits);
 
 /**
- * @brief Generates a cryptographically secure random mpz_t integer of a
+ * @brief Generates a cryptographically secure random mpz_t prime of a
  * specified bit length. Reads from /dev/urandom. num_bits must be a multiple
  * of 8.
- * @param[out] result Pointer to an mpz_t to store the generated random number.
- * @param[in] num_bits The desired number of bits for the random number (must be
+ * @param[out] result Pointer to an mpz_t to store the generated random prime.
+ * @param[in] num_bits The desired number of bits for the random prime (must be
  * multiple of 8).
  * @return RSA_SUCCESS on success, or an rsa_error_t code.
  */
-rsa_error_t rsa_mpz_gen_random_secure(mpz_t result, mp_bitcnt_t num_bits);
+rsa_error_t rsa_mpz_gen_random_prime_secure(mpz_t result, mp_bitcnt_t num_bits);
 
 /**
  * @brief Performs RSA private key operation (decryption or signing) with
